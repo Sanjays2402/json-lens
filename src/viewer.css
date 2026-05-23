@@ -168,6 +168,16 @@
 .jl-btn-ghost {
   background: transparent;
 }
+.jl-btn[data-action="format"][aria-pressed="true"] {
+  background: var(--accent-soft);
+  border-color: rgba(246, 179, 82, 0.35);
+  color: var(--accent);
+}
+.jl-format-icon {
+  display: inline-flex;
+  align-items: center;
+}
+.jl-format-icon svg { width: 14px; height: 14px; }
 
 /* document viewport */
 .jl-viewport {

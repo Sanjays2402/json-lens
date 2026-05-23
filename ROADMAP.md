@@ -11,7 +11,7 @@ This file is the agent's task queue. Unchecked items get implemented in order. W
 - [x] Copy node as TypeScript interface
 - [x] Copy node as JSON Schema
 - [x] Diff two JSON URLs side-by-side
-- [ ] Pretty-print + minify toggle
+- [x] Pretty-print + minify toggle
 - [ ] Path breadcrumb on hover
 - [ ] Export filtered subtree
 - [ ] Performance mode for >10MB JSON (virtualized tree)

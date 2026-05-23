@@ -254,6 +254,8 @@
     schema: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4" width="7" height="6" rx="1.5"/><rect x="13.5" y="4" width="7" height="6" rx="1.5"/><rect x="3.5" y="14" width="7" height="6" rx="1.5"/><rect x="13.5" y="14" width="7" height="6" rx="1.5"/></svg>`,
     braces: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4c-2 0-3 1-3 3v3c0 1.5-1 2-2 2 1 0 2 .5 2 2v3c0 2 1 3 3 3"/><path d="M15 4c2 0 3 1 3 3v3c0 1.5 1 2 2 2-1 0-2 .5-2 2v3c0 2-1 3-3 3"/></svg>`,
     jsonSchema: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4h9l4 4v12a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z"/><path d="M15 4v5h5"/><path d="M10 13c-1 0-1.5.5-1.5 1.5S9 16 10 16M14 13c1 0 1.5.5 1.5 1.5S15 16 14 16"/></svg>`,
+    minify: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 8h14"/><path d="M7 12h10"/><path d="M9 16h6"/></svg>`,
+    pretty: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h6"/><path d="M4 10h10"/><path d="M4 14h8"/><path d="M4 18h12"/></svg>`,
     diff: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v14"/><path d="M5 6l3-3 3 3"/><path d="M16 21V7"/><path d="M19 18l-3 3-3-3"/></svg>`,
   };
 
@@ -1112,6 +1114,7 @@
           <div class="jl-actions">
             <button class="jl-btn jl-btn-ghost" data-action="expand" title="Expand all" aria-label="Expand all">${ICONS.expand}</button>
             <button class="jl-btn jl-btn-ghost" data-action="collapse" title="Collapse all" aria-label="Collapse all">${ICONS.collapse}</button>
+            <button class="jl-btn jl-btn-ghost" data-action="format" title="Toggle pretty / minify" aria-label="Toggle pretty or minify" aria-pressed="false"><span class="jl-format-icon">${ICONS.pretty}</span><span class="jl-format-label">Pretty</span></button>
             <button class="jl-btn" data-action="copy" title="Copy JSON" aria-label="Copy JSON">${ICONS.copy}<span>Copy</span></button>
             <button class="jl-btn" data-action="download" title="Download JSON" aria-label="Download JSON">${ICONS.download}<span>Save</span></button>
             <button class="jl-btn jl-btn-ghost" data-action="schema" title="Inferred schema" aria-label="Inferred schema" aria-pressed="false">${ICONS.schema}<span>Schema</span></button>
@@ -1270,16 +1273,44 @@
     });
 
     // actions
+    // ---------- pretty / minify toggle ----------
+    // `compact === false` => pretty-printed with 2-space indent (default).
+    // `compact === true`  => single-line minified output.
+    // Affects: raw view, Copy, Download. Tree view is unaffected.
+    let compact = false;
+    const serialize = () => compact ? JSON.stringify(parsed) : JSON.stringify(parsed, null, 2);
+    const formatBtn = root.querySelector('[data-action="format"]');
+    const formatIcon = formatBtn.querySelector('.jl-format-icon');
+    const formatLabel = formatBtn.querySelector('.jl-format-label');
+    const refreshFormatBtn = () => {
+      // The label/icon show the action you'd take next, not the current state.
+      formatIcon.innerHTML = compact ? ICONS.pretty : ICONS.minify;
+      formatLabel.textContent = compact ? "Pretty" : "Minify";
+      formatBtn.setAttribute("aria-pressed", String(compact));
+      formatBtn.setAttribute("title", compact ? "Switch to pretty-printed" : "Switch to minified");
+      root.classList.toggle("jl-compact", compact);
+    };
+    refreshFormatBtn();
+    formatBtn.addEventListener("click", () => {
+      compact = !compact;
+      refreshFormatBtn();
+      // If raw view is open, refresh its content immediately.
+      if (root.classList.contains("jl-raw-mode")) {
+        root.querySelector(".jl-raw code").textContent = serialize();
+      }
+      flash(root, compact ? "Minified" : "Pretty-printed");
+    });
+
     root.querySelector('[data-action="copy"]').addEventListener("click", async () => {
       try {
-        await navigator.clipboard.writeText(JSON.stringify(parsed, null, 2));
-        flash(root, "Copied");
+        await navigator.clipboard.writeText(serialize());
+        flash(root, compact ? "Copied (minified)" : "Copied");
       } catch {
         flash(root, "Copy failed");
       }
     });
     root.querySelector('[data-action="download"]').addEventListener("click", () => {
-      const blob = new Blob([JSON.stringify(parsed, null, 2)], { type: "application/json" });
+      const blob = new Blob([serialize()], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -1621,7 +1652,7 @@
       const rawEl = root.querySelector(".jl-raw");
       const host = root.querySelector(".jl-tree-host");
       if (inRaw) {
-        rawEl.querySelector("code").textContent = rawText;
+        rawEl.querySelector("code").textContent = serialize();
         rawEl.hidden = false;
         host.hidden = true;
       } else {
