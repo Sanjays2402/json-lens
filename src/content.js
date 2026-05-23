@@ -1739,6 +1739,91 @@
     return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
 
+  // Tokenize a regex source into highlightable chunks for the mirror overlay.
+  // Best-effort lexer — produces visually coherent groupings even for partial
+  // / in-progress patterns. Not a validator (compilation handles validation).
+  function tokenizeRegex(src) {
+    const out = [];
+    const n = src.length;
+    let i = 0;
+    while (i < n) {
+      const c = src[i];
+      if (c === "\\") {
+        const next = i + 1 < n ? src[i + 1] : "";
+        out.push({ t: "esc", s: next ? src.slice(i, i + 2) : c });
+        i += next ? 2 : 1;
+        continue;
+      }
+      if (c === "[") {
+        let j = i + 1;
+        if (src[j] === "^") j++;
+        if (src[j] === "]") j++; // literal ] at start
+        while (j < n && src[j] !== "]") {
+          if (src[j] === "\\" && j + 1 < n) j += 2;
+          else j++;
+        }
+        if (j < n) j++; // include closing ]
+        out.push({ t: "class", s: src.slice(i, j) });
+        i = j;
+        continue;
+      }
+      if (c === "(") {
+        let s = "(";
+        let j = i + 1;
+        if (src[j] === "?") {
+          const k = src[j + 1];
+          if (k === ":" || k === "=" || k === "!") {
+            s = src.slice(i, j + 2);
+            j += 2;
+          } else if (k === "<") {
+            const k2 = src[j + 2];
+            if (k2 === "=" || k2 === "!") { s = src.slice(i, j + 3); j += 3; }
+            else {
+              let m = j + 2;
+              while (m < n && src[m] !== ">") m++;
+              if (m < n) m++;
+              s = src.slice(i, m);
+              j = m;
+            }
+          } else { s = src.slice(i, j + 1); j += 1; }
+        }
+        out.push({ t: "group", s });
+        i = j > i ? j : i + 1;
+        continue;
+      }
+      if (c === ")" || c === "|") { out.push({ t: "group", s: c }); i++; continue; }
+      if (c === "*" || c === "+" || c === "?") { out.push({ t: "quant", s: c }); i++; continue; }
+      if (c === "{") {
+        let j = i + 1;
+        while (j < n && src[j] !== "}") j++;
+        if (j < n) j++;
+        out.push({ t: "quant", s: src.slice(i, j) });
+        i = j;
+        continue;
+      }
+      if (c === "^" || c === "$" || c === ".") { out.push({ t: "anchor", s: c }); i++; continue; }
+      // Accumulate consecutive literal characters into a single span.
+      let j = i;
+      while (j < n && !"\\[](){}|*+?.^$".includes(src[j])) j++;
+      out.push({ t: "lit", s: src.slice(i, j) });
+      i = j;
+    }
+    return out;
+  }
+
+  function renderRegexMirror(mirror, src) {
+    if (!mirror) return;
+    mirror.textContent = "";
+    if (!src) return;
+    const toks = tokenizeRegex(src);
+    for (const tok of toks) {
+      const sp = document.createElement("span");
+      sp.className = `jl-rx-${tok.t}`;
+      sp.textContent = tok.s;
+      mirror.appendChild(sp);
+    }
+  }
+
   function clearSearch(tree) {
     tree.classList.remove("jl-searching");
     tree.querySelectorAll(SEARCH_TARGETS).forEach((el) => {
@@ -1774,8 +1859,9 @@
     return hits;
   }
 
-  function applySearch(tree, query) {
+  function applySearch(tree, query, opts) {
     const q = String(query || "");
+    const regexMode = !!(opts && opts.regex);
     if (!q) {
       clearSearch(tree);
       return { matches: [], empty: true };
@@ -1783,7 +1869,17 @@
     // Search must consider the whole document, even nodes whose DOM has
     // not been materialized yet in perf mode.
     if (PERF_MODE) materializeAll(tree);
-    const rx = new RegExp(escRegex(q), "gi");
+    let rx;
+    if (regexMode) {
+      try { rx = new RegExp(q, "gi"); }
+      catch (err) {
+        clearSearch(tree);
+        tree.classList.add("jl-searching");
+        return { matches: [], error: (err && err.message) || "invalid regex" };
+      }
+    } else {
+      rx = new RegExp(escRegex(q), "gi");
+    }
     clearSearch(tree);
     tree.classList.add("jl-searching");
     const targets = tree.querySelectorAll(SEARCH_TARGETS);
@@ -1957,9 +2053,14 @@
         </div>
         <div class="jl-chrome-search" role="search">
           <span class="jl-search-icon" aria-hidden="true">${ICONS.search}</span>
-          <input class="jl-search-input" type="text" spellcheck="false" autocomplete="off"
-                 placeholder="Search keys & values — ⌘⇧K"
-                 aria-label="Search keys and values" />
+          <div class="jl-search-input-wrap">
+            <div class="jl-search-mirror" aria-hidden="true"></div>
+            <input class="jl-search-input" type="text" spellcheck="false" autocomplete="off"
+                   placeholder="Search keys & values — ⌘⇧K"
+                   aria-label="Search keys and values" />
+          </div>
+          <button class="jl-search-regex" type="button" role="switch" aria-checked="false"
+                  title="Toggle regex mode" aria-label="Toggle regex search"><span aria-hidden="true">.*</span></button>
           <span class="jl-search-status" aria-live="polite"></span>
           <div class="jl-search-nav" role="group" aria-label="Search navigation">
             <button class="jl-search-prev" type="button" title="Previous match (Shift+Enter)" aria-label="Previous match" disabled>${ICONS.arrowUp}</button>
@@ -2807,9 +2908,12 @@
     const searchPrev = root.querySelector(".jl-search-prev");
     const searchNext = root.querySelector(".jl-search-next");
     const searchRow = root.querySelector(".jl-chrome-search");
+    const searchMirror = root.querySelector(".jl-search-mirror");
+    const searchRegexBtn = root.querySelector(".jl-search-regex");
     let searchMatches = [];
     let searchIdx = -1;
     let searchTimer = 0;
+    let searchRegexMode = false;
 
     const setActiveMatch = (next) => {
       if (!searchMatches.length) {
@@ -2833,6 +2937,8 @@
       const has = value.length > 0;
       searchClear.hidden = !has;
       searchRow.classList.toggle("jl-search-active", has);
+      if (searchRegexMode) renderRegexMirror(searchMirror, value);
+      else searchMirror.textContent = "";
       if (!has) {
         clearSearch(tree);
         searchMatches = [];
@@ -2840,10 +2946,22 @@
         searchStatus.textContent = "";
         searchPrev.disabled = true;
         searchNext.disabled = true;
-        searchRow.classList.remove("jl-search-empty");
+        searchRow.classList.remove("jl-search-empty", "jl-search-error");
         return;
       }
-      const { matches } = applySearch(tree, value);
+      const result = applySearch(tree, value, { regex: searchRegexMode });
+      if (result.error) {
+        searchMatches = [];
+        searchIdx = -1;
+        searchPrev.disabled = true;
+        searchNext.disabled = true;
+        searchRow.classList.add("jl-search-error");
+        searchRow.classList.remove("jl-search-empty");
+        searchStatus.textContent = result.error;
+        return;
+      }
+      searchRow.classList.remove("jl-search-error");
+      const matches = result.matches;
       searchMatches = matches;
       searchPrev.disabled = matches.length < 2;
       searchNext.disabled = matches.length < 2;
@@ -2858,8 +2976,14 @@
 
     searchInput.addEventListener("input", () => {
       const val = searchInput.value;
+      // Keep the highlighted mirror in lock-step with typing (no debounce).
+      if (searchRegexMode) renderRegexMirror(searchMirror, val);
       clearTimeout(searchTimer);
       searchTimer = setTimeout(() => runSearch(val), 80);
+    });
+    searchInput.addEventListener("scroll", () => {
+      // Keep mirror aligned when the input scrolls horizontally.
+      searchMirror.scrollLeft = searchInput.scrollLeft;
     });
     searchInput.addEventListener("keydown", (ev) => {
       if (ev.key === "Escape") {
@@ -2883,6 +3007,15 @@
     searchClear.addEventListener("click", () => {
       searchInput.value = "";
       runSearch("");
+      searchInput.focus();
+    });
+    // Regex-mode toggle — lights up the input with token highlighting.
+    searchRegexBtn.addEventListener("click", () => {
+      searchRegexMode = !searchRegexMode;
+      searchRegexBtn.setAttribute("aria-checked", searchRegexMode ? "true" : "false");
+      searchRegexBtn.classList.toggle("jl-search-regex-on", searchRegexMode);
+      searchRow.classList.toggle("jl-search-regex-mode", searchRegexMode);
+      runSearch(searchInput.value);
       searchInput.focus();
     });
     // ⌘⇧K / Ctrl+⇧K focuses search (⌘K is reserved for the command palette)

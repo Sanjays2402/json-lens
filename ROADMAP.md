@@ -28,7 +28,7 @@ This file is the agent's task queue. Unchecked items get implemented in order. W
 - [x] Pinned nodes sidebar (drag any node to pin for cross-reference)
 - [x] Command palette (Cmd+K) for all extension actions
 - [x] GraphQL response detection with operation/variables panel
-- [ ] Inline syntax-highlighted regex search across keys and values
+- [x] Inline syntax-highlighted regex search across keys and values
 - [ ] Node annotations — attach personal notes to any JSON path (persisted per-URL)
 - [ ] Auto-link detection: render URLs, emails, and IP addresses as clickable chips
 - [ ] Schema comparison: diff inferred schemas between two endpoints
