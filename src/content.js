@@ -277,7 +277,96 @@
     undo: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 6 6v0a6 6 0 0 1-6 6h-3"/></svg>`,
     patch: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7l8-3 8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9z"/><path d="M9 12l2 2 4-4"/></svg>`,
     terminal: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 10l3 2-3 2"/><path d="M13 14h4"/></svg>`,
+    history: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 7v5l3.5 2"/></svg>`,
+    diffArrow: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/></svg>`,
   };
+
+  // ---------- history (snapshots per URL) ----------
+  // Persisted in chrome.storage.local under HISTORY_KEY. Each url maps to an
+  // array of snapshots (latest first), capped at HISTORY_PER_URL. We skip
+  // storing the raw text for very large payloads to keep extension storage
+  // under quota; metadata (size, hash, ts) is always kept.
+  const HISTORY_KEY = "json-lens:history";
+  const HISTORY_PER_URL = 20;
+  const HISTORY_MAX_URLS = 80;
+  const HISTORY_RAW_LIMIT = 768 * 1024; // bytes
+
+  function historyStorage() {
+    try { return chrome && chrome.storage && chrome.storage.local ? chrome.storage.local : null; }
+    catch { return null; }
+  }
+
+  function loadHistoryAll() {
+    return new Promise((resolve) => {
+      const s = historyStorage();
+      if (!s) { resolve({}); return; }
+      try {
+        s.get(HISTORY_KEY, (obj) => {
+          if (chrome.runtime && chrome.runtime.lastError) { resolve({}); return; }
+          const v = obj && obj[HISTORY_KEY];
+          resolve(v && typeof v === "object" ? v : {});
+        });
+      } catch { resolve({}); }
+    });
+  }
+
+  function saveHistoryAll(map) {
+    return new Promise((resolve) => {
+      const s = historyStorage();
+      if (!s) { resolve(false); return; }
+      try {
+        s.set({ [HISTORY_KEY]: map }, () => resolve(!(chrome.runtime && chrome.runtime.lastError)));
+      } catch { resolve(false); }
+    });
+  }
+
+  // Fast 32-bit FNV-1a hash for snapshot fingerprinting / dedupe.
+  function jlFastHash(str) {
+    let h = 0x811c9dc5;
+    for (let i = 0; i < str.length; i++) {
+      h ^= str.charCodeAt(i);
+      h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0;
+    }
+    return h.toString(16).padStart(8, "0");
+  }
+
+  function trimHistoryMap(map) {
+    // If we exceed HISTORY_MAX_URLS, drop the URLs whose most recent snapshot
+    // is oldest. Keeps storage bounded across many visited endpoints.
+    const keys = Object.keys(map);
+    if (keys.length <= HISTORY_MAX_URLS) return map;
+    keys.sort((a, b) => {
+      const ta = (map[a] && map[a][0] && map[a][0].ts) || 0;
+      const tb = (map[b] && map[b][0] && map[b][0].ts) || 0;
+      return tb - ta;
+    });
+    const next = {};
+    for (const k of keys.slice(0, HISTORY_MAX_URLS)) next[k] = map[k];
+    return next;
+  }
+
+  async function recordSnapshot(url, rawText) {
+    if (!url || typeof rawText !== "string") return;
+    const size = rawText.length;
+    const hash = jlFastHash(rawText);
+    const map = await loadHistoryAll();
+    const list = Array.isArray(map[url]) ? map[url] : [];
+    if (list.length && list[0].hash === hash) {
+      // No change — bump ts of the latest entry so recency reflects this visit.
+      list[0].ts = Date.now();
+    } else {
+      list.unshift({
+        id: cryptoIdish().replace(/^bm_/, "hs_"),
+        ts: Date.now(),
+        size,
+        hash,
+        raw: size <= HISTORY_RAW_LIMIT ? rawText : null,
+      });
+      if (list.length > HISTORY_PER_URL) list.length = HISTORY_PER_URL;
+    }
+    map[url] = list;
+    await saveHistoryAll(trimHistoryMap(map));
+  }
 
   // ---------- bookmarks ----------
   // Persisted in chrome.storage.local under BOOKMARKS_KEY so they survive page
@@ -1409,6 +1498,7 @@
             <button class="jl-btn jl-btn-ghost" data-action="diff" title="Diff against another JSON URL" aria-label="Diff against another JSON URL" aria-pressed="false">${ICONS.diff}<span>Diff</span></button>
             <button class="jl-btn jl-btn-ghost" data-action="jsonpath" title="JSONPath evaluator" aria-label="JSONPath evaluator" aria-pressed="false">${ICONS.jsonpath}<span>JSONPath</span></button>
             <button class="jl-btn jl-btn-ghost" data-action="bookmarks" title="Bookmarks (B)" aria-label="Bookmarks" aria-pressed="false">${ICONS.bookmark}<span>Bookmarks</span></button>
+            <button class="jl-btn jl-btn-ghost" data-action="history" title="History (H)" aria-label="History timeline" aria-pressed="false">${ICONS.history}<span>History</span><span class="jl-hist-count" aria-hidden="true"></span></button>
             <button class="jl-btn jl-btn-ghost" data-action="palette" title="Command palette (⌘⇧P)" aria-label="Command palette">${ICONS.command}<span>Actions</span></button>
             <button class="jl-btn jl-btn-ghost" data-action="raw" title="Toggle raw view" aria-label="Toggle raw view">${ICONS.raw}<span>Raw</span></button>
             <div class="jl-theme-switch" role="group" aria-label="Theme">
@@ -1588,6 +1678,44 @@
               <button type="submit" class="jl-btn jl-bm-edit-save">Save</button>
             </div>
           </form>
+        </aside>
+        <aside class="jl-history-panel" hidden aria-label="JSON snapshot history for this URL">
+          <div class="jl-hist-header">
+            <div class="jl-hist-title">
+              <span class="jl-hist-title-icon" aria-hidden="true">${ICONS.history}</span>
+              <span>History</span>
+            </div>
+            <div class="jl-hist-summary" aria-live="polite"></div>
+            <div class="jl-hist-tools">
+              <button class="jl-btn jl-btn-ghost jl-hist-clear" type="button" title="Clear history for this URL" aria-label="Clear history for this URL">${ICONS.trash}<span>Clear</span></button>
+              <button class="jl-btn jl-btn-ghost jl-hist-close" type="button" title="Close history" aria-label="Close history">${ICONS.close}</button>
+            </div>
+          </div>
+          <div class="jl-hist-url" title=""></div>
+          <div class="jl-hist-body" role="list"></div>
+          <div class="jl-hist-empty" hidden>
+            <svg class="jl-hist-empty-art" viewBox="0 0 160 110" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="80" cy="55" r="34"/>
+              <path d="M80 36v19l13 8"/>
+              <path d="M40 55a40 40 0 1 1 14 30" opacity="0.45"/>
+              <path d="M40 45v10h10" opacity="0.6"/>
+              <circle cx="122" cy="24" r="2.5" opacity="0.5"/>
+              <circle cx="30" cy="86" r="2" opacity="0.5"/>
+            </svg>
+            <div class="jl-hist-empty-title">No snapshots yet</div>
+            <div class="jl-hist-empty-hint">Each time you load this JSON endpoint, a snapshot is captured automatically. We keep the last <strong>20</strong> per URL.</div>
+          </div>
+          <div class="jl-hist-viewer" hidden role="dialog" aria-modal="true" aria-label="Snapshot raw view">
+            <div class="jl-hist-viewer-head">
+              <div class="jl-hist-viewer-title"></div>
+              <div class="jl-hist-viewer-tools">
+                <button type="button" class="jl-btn jl-btn-ghost jl-hist-vw-copy" title="Copy snapshot JSON" aria-label="Copy snapshot JSON">${ICONS.copy}<span>Copy</span></button>
+                <button type="button" class="jl-btn jl-btn-ghost jl-hist-vw-download" title="Download snapshot JSON" aria-label="Download snapshot JSON">${ICONS.download}<span>Save</span></button>
+                <button type="button" class="jl-btn jl-btn-ghost jl-hist-vw-close" title="Close snapshot view" aria-label="Close snapshot view">${ICONS.close}</button>
+              </div>
+            </div>
+            <pre class="jl-hist-viewer-pre"><code></code></pre>
+          </div>
         </aside>
         <div class="jl-palette-backdrop" hidden aria-hidden="true"></div>
         <div class="jl-palette" hidden role="dialog" aria-modal="true" aria-label="Command palette">
@@ -3153,6 +3281,236 @@
     ns.parseTagInput = parseTagInput;
     ns.deriveBookmarkName = deriveBookmarkName;
 
+    // ---------- history panel ----------
+    const histBtn = root.querySelector('[data-action="history"]');
+    const histPanel = root.querySelector(".jl-history-panel");
+    const histBody = root.querySelector(".jl-hist-body");
+    const histEmpty = root.querySelector(".jl-hist-empty");
+    const histSummary = root.querySelector(".jl-hist-summary");
+    const histUrlEl = root.querySelector(".jl-hist-url");
+    const histCloseBtn = root.querySelector(".jl-hist-close");
+    const histClearBtn = root.querySelector(".jl-hist-clear");
+    const histCountChip = histBtn.querySelector(".jl-hist-count");
+    const histViewer = root.querySelector(".jl-hist-viewer");
+    const histViewerTitle = root.querySelector(".jl-hist-viewer-title");
+    const histViewerPre = root.querySelector(".jl-hist-viewer-pre code");
+    const histVwCopy = root.querySelector(".jl-hist-vw-copy");
+    const histVwDownload = root.querySelector(".jl-hist-vw-download");
+    const histVwClose = root.querySelector(".jl-hist-vw-close");
+
+    let histList = [];
+    let histOpenSnap = null;
+
+    function refreshHistCount() {
+      const n = histList.length;
+      if (!n) { histCountChip.hidden = true; histCountChip.textContent = ""; }
+      else { histCountChip.hidden = false; histCountChip.textContent = String(n); }
+    }
+
+    function fmtAbsTime(ts) {
+      try { return new Date(ts).toLocaleString(); } catch { return new Date(ts).toISOString(); }
+    }
+
+    function renderHistory() {
+      histUrlEl.textContent = location.href;
+      histUrlEl.title = location.href;
+      if (!histList.length) {
+        histEmpty.hidden = false;
+        histBody.innerHTML = "";
+        histSummary.textContent = "";
+        histClearBtn.disabled = true;
+        return;
+      }
+      histEmpty.hidden = true;
+      histClearBtn.disabled = false;
+      const newestHash = histList[0].hash;
+      histSummary.textContent = `${histList.length} snapshot${histList.length === 1 ? "" : "s"} • latest ${relativeTime(histList[0].ts)}`;
+      const frag = document.createDocumentFragment();
+      histList.forEach((snap, idx) => {
+        const prev = histList[idx + 1];
+        const changed = !prev || prev.hash !== snap.hash;
+        const card = document.createElement("div");
+        card.className = "jl-hist-card" + (snap.hash === newestHash && idx === 0 ? " jl-hist-card-current" : "");
+        card.setAttribute("role", "listitem");
+        card.dataset.id = snap.id;
+        const sizeStr = formatBytes(snap.size);
+        const canView = typeof snap.raw === "string";
+        const changeBadge = idx === 0
+          ? `<span class="jl-hist-chip jl-hist-chip-current">latest</span>`
+          : (changed ? `<span class="jl-hist-chip jl-hist-chip-changed">changed</span>` : `<span class="jl-hist-chip">same</span>`);
+        card.innerHTML = `
+          <button type="button" class="jl-hist-card-main" data-act="view" ${canView ? "" : "disabled aria-disabled=\"true\""}>
+            <div class="jl-hist-card-head">
+              <span class="jl-hist-card-time" title="${escapeHTML(fmtAbsTime(snap.ts))}">${escapeHTML(relativeTime(snap.ts) || "just now")}</span>
+              ${changeBadge}
+            </div>
+            <div class="jl-hist-card-meta">
+              <span class="jl-hist-meta-size">${escapeHTML(sizeStr)}</span>
+              <span class="jl-hist-meta-sep">·</span>
+              <code class="jl-hist-meta-hash">${escapeHTML(snap.hash)}</code>
+              ${canView ? "" : `<span class="jl-hist-meta-sep">·</span><span class="jl-hist-meta-tag">metadata only</span>`}
+            </div>
+          </button>
+          <div class="jl-hist-card-actions">
+            <button type="button" class="jl-icon-btn jl-hist-act-copy" data-act="copy" title="Copy snapshot JSON" aria-label="Copy snapshot JSON" ${canView ? "" : "disabled aria-disabled=\"true\""}>${ICONS.copy}</button>
+            <button type="button" class="jl-icon-btn jl-hist-act-download" data-act="download" title="Download snapshot JSON" aria-label="Download snapshot JSON" ${canView ? "" : "disabled aria-disabled=\"true\""}>${ICONS.download}</button>
+            <button type="button" class="jl-icon-btn jl-hist-act-delete" data-act="delete" title="Delete snapshot" aria-label="Delete snapshot">${ICONS.trash}</button>
+          </div>`;
+        frag.appendChild(card);
+      });
+      histBody.innerHTML = "";
+      histBody.appendChild(frag);
+    }
+
+    async function reloadHistoryForCurrent() {
+      const map = await loadHistoryAll();
+      histList = Array.isArray(map[location.href]) ? map[location.href] : [];
+      refreshHistCount();
+      if (!histPanel.hidden) renderHistory();
+    }
+
+    async function deleteHistoryEntry(id) {
+      const map = await loadHistoryAll();
+      const list = Array.isArray(map[location.href]) ? map[location.href] : [];
+      const next = list.filter((s) => s.id !== id);
+      if (next.length) map[location.href] = next; else delete map[location.href];
+      await saveHistoryAll(map);
+      histList = next;
+      refreshHistCount();
+      renderHistory();
+    }
+
+    async function clearHistoryForCurrent() {
+      const map = await loadHistoryAll();
+      delete map[location.href];
+      await saveHistoryAll(map);
+      histList = [];
+      refreshHistCount();
+      renderHistory();
+      closeHistoryViewer();
+    }
+
+    function downloadText(filename, text, mime) {
+      try {
+        const blob = new Blob([text], { type: mime || "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url; a.download = filename;
+        document.body.appendChild(a); a.click();
+        setTimeout(() => { try { document.body.removeChild(a); } catch {} URL.revokeObjectURL(url); }, 0);
+      } catch (err) { console.debug("[json-lens] download error", err); }
+    }
+
+    function openHistoryViewer(snap) {
+      if (!snap || typeof snap.raw !== "string") {
+        flash(root, "Snapshot body not stored (too large)");
+        return;
+      }
+      histOpenSnap = snap;
+      histViewer.hidden = false;
+      histViewerTitle.textContent = `${fmtAbsTime(snap.ts)} • ${formatBytes(snap.size)} • #${snap.hash}`;
+      // Pretty-print best-effort; fall back to raw text.
+      let display = snap.raw;
+      try { display = JSON.stringify(JSON.parse(snap.raw), null, 2); } catch {}
+      histViewerPre.textContent = display;
+    }
+
+    function closeHistoryViewer() {
+      histViewer.hidden = true;
+      histOpenSnap = null;
+    }
+
+    function setHistoryOpen(open) {
+      histPanel.hidden = !open;
+      root.classList.toggle("jl-history-open", open);
+      histBtn.setAttribute("aria-pressed", String(open));
+      if (open) {
+        closeHistoryViewer();
+        renderHistory();
+      }
+    }
+
+    histBtn.addEventListener("click", () => setHistoryOpen(histPanel.hidden));
+    histCloseBtn.addEventListener("click", () => setHistoryOpen(false));
+    histClearBtn.addEventListener("click", () => {
+      if (!histList.length) return;
+      clearHistoryForCurrent();
+      flash(root, "History cleared for this URL");
+    });
+
+    histBody.addEventListener("click", (ev) => {
+      const btn = ev.target.closest("button[data-act]");
+      if (!btn) return;
+      const card = btn.closest(".jl-hist-card");
+      if (!card) return;
+      const id = card.dataset.id;
+      const snap = histList.find((s) => s.id === id);
+      if (!snap) return;
+      const act = btn.dataset.act;
+      if (act === "view") {
+        openHistoryViewer(snap);
+      } else if (act === "copy") {
+        if (typeof snap.raw !== "string") { flash(root, "Snapshot body not stored"); return; }
+        try { navigator.clipboard.writeText(snap.raw); flash(root, "Snapshot copied"); }
+        catch { flash(root, "Copy failed"); }
+      } else if (act === "download") {
+        if (typeof snap.raw !== "string") { flash(root, "Snapshot body not stored"); return; }
+        const stamp = new Date(snap.ts).toISOString().replace(/[:.]/g, "-");
+        downloadText(`snapshot-${stamp}-${snap.hash}.json`, snap.raw);
+      } else if (act === "delete") {
+        deleteHistoryEntry(id);
+        flash(root, "Snapshot removed");
+      }
+    });
+
+    histVwClose.addEventListener("click", closeHistoryViewer);
+    histVwCopy.addEventListener("click", () => {
+      if (!histOpenSnap || typeof histOpenSnap.raw !== "string") return;
+      try { navigator.clipboard.writeText(histOpenSnap.raw); flash(root, "Snapshot copied"); }
+      catch { flash(root, "Copy failed"); }
+    });
+    histVwDownload.addEventListener("click", () => {
+      if (!histOpenSnap || typeof histOpenSnap.raw !== "string") return;
+      const stamp = new Date(histOpenSnap.ts).toISOString().replace(/[:.]/g, "-");
+      downloadText(`snapshot-${stamp}-${histOpenSnap.hash}.json`, histOpenSnap.raw);
+    });
+
+    // Keyboard: 'H' toggles when not typing
+    document.addEventListener("keydown", (ev) => {
+      if (ev.key !== "h" && ev.key !== "H") return;
+      if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
+      const target = ev.target;
+      const tag = target && target.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || (target && target.isContentEditable)) return;
+      ev.preventDefault();
+      setHistoryOpen(histPanel.hidden);
+    });
+    document.addEventListener("keydown", (ev) => {
+      if (ev.key === "Escape" && !histViewer.hidden) {
+        ev.stopPropagation();
+        closeHistoryViewer();
+      }
+    }, true);
+
+    // Sync across tabs.
+    try {
+      if (chrome && chrome.storage && chrome.storage.onChanged) {
+        chrome.storage.onChanged.addListener((changes, area) => {
+          if (area !== "local" || !changes[HISTORY_KEY]) return;
+          reloadHistoryForCurrent();
+        });
+      }
+    } catch {}
+
+    // Record this page load as a snapshot, then reload the list for UI.
+    (async () => {
+      try { await recordSnapshot(location.href, STATE.rawText || ""); } catch {}
+      reloadHistoryForCurrent();
+    })();
+
+    ns.jlFastHash = jlFastHash;
+    ns.recordSnapshot = recordSnapshot;
+
     // ---------- command palette ----------
     const paletteBtn = root.querySelector('[data-action="palette"]');
     const palette = root.querySelector(".jl-palette");
@@ -3177,6 +3535,8 @@
         { id: "jsonpath", label: "Toggle JSONPath evaluator panel", hint: "Panel", icon: ICONS.jsonpath, run: () => root.querySelector('[data-action="jsonpath"]').click() },
         { id: "bookmarks", label: "Toggle bookmarks panel", hint: "B", icon: ICONS.bookmark, run: () => root.querySelector('[data-action="bookmarks"]').click() },
         { id: "bookmark-add", label: "Bookmark this URL", hint: "Save", icon: ICONS.plus, run: () => { setBookmarksOpen(true); addCurrentAsBookmark(); } },
+        { id: "history", label: "Toggle history timeline", hint: "H", icon: ICONS.history, run: () => root.querySelector('[data-action="history"]').click() },
+        { id: "history-clear", label: "Clear history for this URL", hint: "History", icon: ICONS.trash, run: () => { setHistoryOpen(true); clearHistoryForCurrent(); } },
         { id: "raw", label: inRaw ? "Show interactive tree" : "Show raw JSON text", hint: "View", icon: ICONS.raw, run: () => root.querySelector('[data-action="raw"]').click() },
         { id: "focus-search", label: "Focus search bar", hint: "⌘K", icon: ICONS.search, run: () => { setPaletteOpen(false); searchInput.focus(); searchInput.select(); } },
         { id: "focus-filter", label: "Focus jq-style path filter", hint: "/", icon: ICONS.filter, run: () => { setPaletteOpen(false); filterInput.focus(); filterInput.select(); } },
