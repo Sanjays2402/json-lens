@@ -265,7 +265,101 @@
     sun: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4L7 17M17 7l1.4-1.4"/></svg>`,
     moon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>`,
     auto: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><path d="M12 4v16"/><path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor" stroke="none" opacity="0.5"/></svg>`,
+    bookmark: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4.5A1.5 1.5 0 0 1 7.5 3h9A1.5 1.5 0 0 1 18 4.5V21l-6-3.6L6 21z"/></svg>`,
+    bookmarkFilled: `<svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"><path d="M6 4.5A1.5 1.5 0 0 1 7.5 3h9A1.5 1.5 0 0 1 18 4.5V21l-6-3.6L6 21z"/></svg>`,
+    tag: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12l-7.5 7.5a2 2 0 0 1-2.83 0L3 12V4h8z"/><circle cx="8.5" cy="8.5" r="1.3" fill="currentColor" stroke="none"/></svg>`,
+    trash: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16"/><path d="M10 4h4a1 1 0 0 1 1 1v2H9V5a1 1 0 0 1 1-1z"/><path d="M6 7l1 12.5A1.5 1.5 0 0 0 8.5 21h7a1.5 1.5 0 0 0 1.5-1.5L18 7"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>`,
+    plus: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>`,
+    externalLink: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6"/><path d="M20 4l-9 9"/><path d="M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/></svg>`,
+    pencil: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4l10-10-4-4L4 16z"/><path d="M14 6l4 4"/></svg>`,
   };
+
+  // ---------- bookmarks ----------
+  // Persisted in chrome.storage.local under BOOKMARKS_KEY so they survive page
+  // reloads and follow the user across JSON endpoints they visit. Each entry:
+  //   { id, url, name, tags: string[], addedAt, lastOpenedAt }
+  const BOOKMARKS_KEY = "json-lens:bookmarks";
+  const BOOKMARK_MAX = 500;
+
+  function bookmarksStorage() {
+    try { return chrome && chrome.storage && chrome.storage.local ? chrome.storage.local : null; }
+    catch { return null; }
+  }
+
+  function loadBookmarks() {
+    return new Promise((resolve) => {
+      const s = bookmarksStorage();
+      if (!s) { resolve([]); return; }
+      try {
+        s.get(BOOKMARKS_KEY, (obj) => {
+          if (chrome.runtime && chrome.runtime.lastError) { resolve([]); return; }
+          const arr = obj && Array.isArray(obj[BOOKMARKS_KEY]) ? obj[BOOKMARKS_KEY] : [];
+          // basic shape coercion
+          const clean = arr.filter((b) => b && typeof b.url === "string" && b.url).map((b) => ({
+            id: String(b.id || cryptoIdish()),
+            url: String(b.url),
+            name: String(b.name || deriveBookmarkName(b.url)),
+            tags: Array.isArray(b.tags) ? b.tags.map(String).filter(Boolean).slice(0, 16) : [],
+            addedAt: Number(b.addedAt) || Date.now(),
+            lastOpenedAt: Number(b.lastOpenedAt) || 0,
+          }));
+          resolve(clean);
+        });
+      } catch { resolve([]); }
+    });
+  }
+
+  function saveBookmarks(list) {
+    return new Promise((resolve) => {
+      const s = bookmarksStorage();
+      if (!s) { resolve(false); return; }
+      try {
+        s.set({ [BOOKMARKS_KEY]: list.slice(0, BOOKMARK_MAX) }, () => resolve(!(chrome.runtime && chrome.runtime.lastError)));
+      } catch { resolve(false); }
+    });
+  }
+
+  function cryptoIdish() {
+    try {
+      if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
+    } catch {}
+    return "bm_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8);
+  }
+
+  function deriveBookmarkName(url) {
+    try {
+      const u = new URL(url);
+      const last = (u.pathname.split("/").filter(Boolean).pop() || u.hostname).replace(/\.json$/i, "");
+      return decodeURIComponent(last) || u.hostname || url;
+    } catch { return url.slice(0, 60); }
+  }
+
+  function parseTagInput(s) {
+    return String(s || "")
+      .split(/[\s,]+/)
+      .map((t) => t.trim().replace(/^#/, ""))
+      .filter(Boolean)
+      .slice(0, 16);
+  }
+
+  function relativeTime(ts) {
+    if (!ts) return "";
+    const diff = Date.now() - ts;
+    if (diff < 60_000) return "just now";
+    const mins = Math.floor(diff / 60_000);
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    const days = Math.floor(hrs / 24);
+    if (days < 30) return `${days}d ago`;
+    const months = Math.floor(days / 30);
+    if (months < 12) return `${months}mo ago`;
+    return `${Math.floor(months / 12)}y ago`;
+  }
+
+  function escapeHTML(s) {
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
 
   // ---------- theme ----------
   const THEME_KEY = "json-lens:theme";
@@ -1241,6 +1335,7 @@
             <button class="jl-btn" data-action="download" title="Download JSON" aria-label="Download JSON">${ICONS.download}<span>Save</span></button>
             <button class="jl-btn jl-btn-ghost" data-action="schema" title="Inferred schema" aria-label="Inferred schema" aria-pressed="false">${ICONS.schema}<span>Schema</span></button>
             <button class="jl-btn jl-btn-ghost" data-action="diff" title="Diff against another JSON URL" aria-label="Diff against another JSON URL" aria-pressed="false">${ICONS.diff}<span>Diff</span></button>
+            <button class="jl-btn jl-btn-ghost" data-action="bookmarks" title="Bookmarks (B)" aria-label="Bookmarks" aria-pressed="false">${ICONS.bookmark}<span>Bookmarks</span></button>
             <button class="jl-btn jl-btn-ghost" data-action="palette" title="Command palette (⌘⇧P)" aria-label="Command palette">${ICONS.command}<span>Actions</span></button>
             <button class="jl-btn jl-btn-ghost" data-action="raw" title="Toggle raw view" aria-label="Toggle raw view">${ICONS.raw}<span>Raw</span></button>
             <div class="jl-theme-switch" role="group" aria-label="Theme">
@@ -1332,6 +1427,56 @@
           <div class="jl-crumbs" role="list"></div>
           <button class="jl-crumb-copy" type="button" title="Copy path" aria-label="Copy path">${ICONS.copy}</button>
         </div>
+        <aside class="jl-bookmarks-panel" hidden aria-label="Bookmarked JSON endpoints">
+          <div class="jl-bm-header">
+            <div class="jl-bm-title">
+              <span class="jl-bm-title-icon" aria-hidden="true">${ICONS.bookmark}</span>
+              <span>Bookmarks</span>
+            </div>
+            <div class="jl-bm-summary" aria-live="polite"></div>
+            <div class="jl-bm-tools">
+              <button class="jl-btn jl-bm-add" type="button" title="Bookmark current URL" aria-label="Bookmark current URL">${ICONS.plus}<span>Add</span></button>
+              <button class="jl-btn jl-btn-ghost jl-bm-close" type="button" title="Close bookmarks" aria-label="Close bookmarks">${ICONS.close}</button>
+            </div>
+          </div>
+          <div class="jl-bm-search" role="search">
+            <span class="jl-bm-search-icon" aria-hidden="true">${ICONS.search}</span>
+            <input class="jl-bm-search-input" type="text" spellcheck="false" autocomplete="off"
+                   placeholder="Search bookmarks — name, url, #tag" aria-label="Search bookmarks" />
+          </div>
+          <div class="jl-bm-tagbar" role="toolbar" aria-label="Filter by tag" hidden></div>
+          <div class="jl-bm-body" role="list"></div>
+          <div class="jl-bm-empty" hidden>
+            <svg class="jl-bm-empty-art" viewBox="0 0 160 110" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M30 18c-4 6-6 14-4 24 2 11 8 22 18 32 9 9 20 14 31 14 9 0 16-3 21-9" opacity="0.45"/>
+              <path d="M58 22h44a6 6 0 0 1 6 6v62l-28-14-28 14V28a6 6 0 0 1 6-6z"/>
+              <path d="M70 38h20" opacity="0.7"/>
+              <path d="M70 50h28" opacity="0.5"/>
+              <circle cx="122" cy="30" r="3" opacity="0.6"/>
+              <circle cx="42" cy="82" r="2" opacity="0.6"/>
+              <path d="M132 70l3 6 6 1-4.5 4.5 1 6.5-5.5-3-5.5 3 1-6.5L123 77l6-1z" opacity="0.7"/>
+            </svg>
+            <div class="jl-bm-empty-title">No bookmarks yet</div>
+            <div class="jl-bm-empty-hint">Save this JSON endpoint to find it again — tag it for groups like <code>#auth</code> or <code>#staging</code>.</div>
+            <button class="jl-btn jl-bm-empty-add" type="button">${ICONS.plus}<span>Bookmark this URL</span></button>
+          </div>
+          <form class="jl-bm-edit" hidden autocomplete="off">
+            <div class="jl-bm-edit-title"></div>
+            <label class="jl-bm-edit-field">
+              <span>Name</span>
+              <input class="jl-bm-edit-name" type="text" spellcheck="false" maxlength="120" />
+            </label>
+            <label class="jl-bm-edit-field">
+              <span>Tags</span>
+              <input class="jl-bm-edit-tags" type="text" spellcheck="false" placeholder="comma or space separated, e.g. auth, staging" />
+            </label>
+            <div class="jl-bm-edit-url"></div>
+            <div class="jl-bm-edit-actions">
+              <button type="button" class="jl-btn jl-btn-ghost jl-bm-edit-cancel">Cancel</button>
+              <button type="submit" class="jl-btn jl-bm-edit-save">Save</button>
+            </div>
+          </form>
+        </aside>
         <div class="jl-palette-backdrop" hidden aria-hidden="true"></div>
         <div class="jl-palette" hidden role="dialog" aria-modal="true" aria-label="Command palette">
           <div class="jl-palette-search">
@@ -2008,6 +2153,284 @@
       return String(s).replace(/["\\]/g, "\\$&");
     }
 
+    // ---------- bookmarks panel ----------
+    const bmBtn = root.querySelector('[data-action="bookmarks"]');
+    const bmPanel = root.querySelector(".jl-bookmarks-panel");
+    const bmBody = root.querySelector(".jl-bm-body");
+    const bmEmpty = root.querySelector(".jl-bm-empty");
+    const bmEmptyAdd = root.querySelector(".jl-bm-empty-add");
+    const bmAddBtn = root.querySelector(".jl-bm-add");
+    const bmCloseBtn = root.querySelector(".jl-bm-close");
+    const bmSearchInput = root.querySelector(".jl-bm-search-input");
+    const bmTagbar = root.querySelector(".jl-bm-tagbar");
+    const bmSummary = root.querySelector(".jl-bm-summary");
+    const bmEditForm = root.querySelector(".jl-bm-edit");
+    const bmEditName = root.querySelector(".jl-bm-edit-name");
+    const bmEditTags = root.querySelector(".jl-bm-edit-tags");
+    const bmEditUrl = root.querySelector(".jl-bm-edit-url");
+    const bmEditTitleEl = root.querySelector(".jl-bm-edit-title");
+    const bmEditCancel = root.querySelector(".jl-bm-edit-cancel");
+
+    let bookmarks = [];
+    let bmActiveTag = "";
+    let bmEditingId = null;
+
+    function refreshAddBtnState() {
+      const exists = bookmarks.some((b) => b.url === location.href);
+      const icon = exists ? ICONS.bookmarkFilled : ICONS.bookmark;
+      bmBtn.innerHTML = `${icon}<span>Bookmarks</span>`;
+      bmBtn.classList.toggle("jl-bm-active", exists);
+      bmBtn.setAttribute("title", exists ? "Bookmarked — click to manage" : "Bookmarks (B)");
+    }
+
+    function allTagsSorted() {
+      const m = new Map();
+      for (const b of bookmarks) for (const t of b.tags) m.set(t, (m.get(t) || 0) + 1);
+      return [...m.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+    }
+
+    function renderBmTagbar() {
+      const tags = allTagsSorted();
+      if (!tags.length) { bmTagbar.hidden = true; bmTagbar.innerHTML = ""; return; }
+      bmTagbar.hidden = false;
+      const buttons = [`<button type="button" class="jl-bm-tagchip${bmActiveTag === "" ? " jl-bm-tagchip-on" : ""}" data-tag="">All</button>`];
+      for (const [t, c] of tags) {
+        const on = bmActiveTag === t ? " jl-bm-tagchip-on" : "";
+        buttons.push(`<button type="button" class="jl-bm-tagchip${on}" data-tag="${escapeHTML(t)}"><span class="jl-bm-tagchip-hash">#</span>${escapeHTML(t)}<span class="jl-bm-tagchip-count">${c}</span></button>`);
+      }
+      bmTagbar.innerHTML = buttons.join("");
+    }
+
+    function bookmarkMatchesQuery(b, q) {
+      if (!q) return true;
+      const needle = q.toLowerCase();
+      if (needle.startsWith("#")) {
+        const tag = needle.slice(1);
+        return b.tags.some((t) => t.toLowerCase().includes(tag));
+      }
+      return b.name.toLowerCase().includes(needle)
+        || b.url.toLowerCase().includes(needle)
+        || b.tags.some((t) => t.toLowerCase().includes(needle));
+    }
+
+    function renderBookmarks() {
+      const q = bmSearchInput.value.trim();
+      let list = bookmarks.slice();
+      if (bmActiveTag) list = list.filter((b) => b.tags.includes(bmActiveTag));
+      if (q) list = list.filter((b) => bookmarkMatchesQuery(b, q));
+      list.sort((a, b) => (b.lastOpenedAt || b.addedAt) - (a.lastOpenedAt || a.addedAt));
+      bmSummary.textContent = bookmarks.length === 0
+        ? ""
+        : `${list.length} of ${bookmarks.length} · ${allTagsSorted().length} tag${allTagsSorted().length === 1 ? "" : "s"}`;
+      renderBmTagbar();
+      bmBody.innerHTML = "";
+      if (bookmarks.length === 0) {
+        bmEmpty.hidden = false;
+        bmBody.hidden = true;
+        return;
+      }
+      bmEmpty.hidden = true;
+      bmBody.hidden = false;
+      if (list.length === 0) {
+        const note = document.createElement("div");
+        note.className = "jl-bm-noresults";
+        note.textContent = q || bmActiveTag ? "No bookmarks match this filter." : "";
+        bmBody.appendChild(note);
+        return;
+      }
+      const frag = document.createDocumentFragment();
+      for (const b of list) {
+        const card = document.createElement("div");
+        card.className = "jl-bm-card";
+        card.setAttribute("role", "listitem");
+        card.setAttribute("data-id", b.id);
+        const isCurrent = b.url === location.href;
+        if (isCurrent) card.classList.add("jl-bm-card-current");
+        const tagsHTML = b.tags.length
+          ? `<div class="jl-bm-card-tags">${b.tags.map((t) => `<button type="button" class="jl-bm-tagchip jl-bm-tagchip-sm" data-tag="${escapeHTML(t)}"><span class="jl-bm-tagchip-hash">#</span>${escapeHTML(t)}</button>`).join("")}</div>`
+          : "";
+        card.innerHTML = `
+          <button type="button" class="jl-bm-card-main" data-act="open" title="Open ${escapeHTML(b.url)}">
+            <div class="jl-bm-card-head">
+              <span class="jl-bm-card-name">${escapeHTML(b.name)}</span>
+              ${isCurrent ? `<span class="jl-bm-pill">current</span>` : ""}
+            </div>
+            <div class="jl-bm-card-url">${escapeHTML(b.url)}</div>
+            ${tagsHTML}
+            <div class="jl-bm-card-meta">Added ${relativeTime(b.addedAt) || "recently"}${b.lastOpenedAt ? ` · opened ${relativeTime(b.lastOpenedAt)}` : ""}</div>
+          </button>
+          <div class="jl-bm-card-actions">
+            <button type="button" class="jl-bm-iconbtn" data-act="edit" title="Edit name and tags" aria-label="Edit bookmark">${ICONS.pencil}</button>
+            <button type="button" class="jl-bm-iconbtn" data-act="open-new" title="Open in new tab" aria-label="Open in new tab">${ICONS.externalLink}</button>
+            <button type="button" class="jl-bm-iconbtn jl-bm-iconbtn-danger" data-act="remove" title="Remove bookmark" aria-label="Remove bookmark">${ICONS.trash}</button>
+          </div>`;
+        frag.appendChild(card);
+      }
+      bmBody.appendChild(frag);
+    }
+
+    function openEditForm(b) {
+      bmEditingId = b.id;
+      bmEditTitleEl.textContent = b === pendingNew ? "New bookmark" : "Edit bookmark";
+      bmEditName.value = b.name;
+      bmEditTags.value = b.tags.join(", ");
+      bmEditUrl.textContent = b.url;
+      bmEditForm.hidden = false;
+      bmBody.classList.add("jl-bm-body-dim");
+      setTimeout(() => bmEditName.focus(), 30);
+    }
+    function closeEditForm() {
+      bmEditingId = null;
+      pendingNew = null;
+      bmEditForm.hidden = true;
+      bmBody.classList.remove("jl-bm-body-dim");
+    }
+
+    let pendingNew = null;
+
+    async function persistBookmarks() {
+      await saveBookmarks(bookmarks);
+      refreshAddBtnState();
+      renderBookmarks();
+    }
+
+    async function addCurrentAsBookmark() {
+      const existing = bookmarks.find((b) => b.url === location.href);
+      if (existing) { openEditForm(existing); return; }
+      pendingNew = {
+        id: cryptoIdish(),
+        url: location.href,
+        name: deriveBookmarkName(location.href),
+        tags: [],
+        addedAt: Date.now(),
+        lastOpenedAt: 0,
+      };
+      openEditForm(pendingNew);
+    }
+
+    bmEditForm.addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      const name = bmEditName.value.trim() || deriveBookmarkName(bmEditUrl.textContent || location.href);
+      const tags = parseTagInput(bmEditTags.value);
+      if (pendingNew && bmEditingId === pendingNew.id) {
+        pendingNew.name = name;
+        pendingNew.tags = tags;
+        bookmarks.unshift(pendingNew);
+        flash(root, "Bookmark added");
+      } else {
+        const target = bookmarks.find((b) => b.id === bmEditingId);
+        if (target) { target.name = name; target.tags = tags; flash(root, "Bookmark updated"); }
+      }
+      closeEditForm();
+      await persistBookmarks();
+    });
+    bmEditCancel.addEventListener("click", () => closeEditForm());
+    bmEditForm.addEventListener("keydown", (ev) => {
+      if (ev.key === "Escape") { ev.preventDefault(); closeEditForm(); }
+    });
+
+    bmAddBtn.addEventListener("click", addCurrentAsBookmark);
+    bmEmptyAdd.addEventListener("click", addCurrentAsBookmark);
+    bmCloseBtn.addEventListener("click", () => setBookmarksOpen(false));
+
+    bmSearchInput.addEventListener("input", () => renderBookmarks());
+    bmSearchInput.addEventListener("keydown", (ev) => {
+      if (ev.key === "Escape") { ev.preventDefault(); bmSearchInput.value = ""; renderBookmarks(); }
+    });
+
+    bmTagbar.addEventListener("click", (ev) => {
+      const chip = ev.target instanceof Element ? ev.target.closest(".jl-bm-tagchip") : null;
+      if (!chip) return;
+      bmActiveTag = chip.getAttribute("data-tag") || "";
+      renderBookmarks();
+    });
+
+    bmBody.addEventListener("click", async (ev) => {
+      const target = ev.target instanceof Element ? ev.target : null;
+      if (!target) return;
+      const tagChip = target.closest(".jl-bm-tagchip");
+      if (tagChip && bmBody.contains(tagChip)) {
+        ev.stopPropagation();
+        bmActiveTag = tagChip.getAttribute("data-tag") || "";
+        renderBookmarks();
+        return;
+      }
+      const card = target.closest(".jl-bm-card");
+      if (!card) return;
+      const id = card.getAttribute("data-id");
+      const b = bookmarks.find((x) => x.id === id);
+      if (!b) return;
+      const actBtn = target.closest("[data-act]");
+      const act = actBtn ? actBtn.getAttribute("data-act") : null;
+      if (act === "remove") {
+        bookmarks = bookmarks.filter((x) => x.id !== id);
+        flash(root, "Bookmark removed");
+        await persistBookmarks();
+        return;
+      }
+      if (act === "edit") { openEditForm(b); return; }
+      if (act === "open-new") {
+        try { window.open(b.url, "_blank", "noopener"); } catch {}
+        b.lastOpenedAt = Date.now();
+        await persistBookmarks();
+        return;
+      }
+      // default = open in current tab
+      b.lastOpenedAt = Date.now();
+      await saveBookmarks(bookmarks);
+      if (b.url === location.href) { setBookmarksOpen(false); return; }
+      location.href = b.url;
+    });
+
+    function setBookmarksOpen(open) {
+      bmPanel.hidden = !open;
+      root.classList.toggle("jl-bookmarks-open", open);
+      bmBtn.setAttribute("aria-pressed", String(open));
+      if (open) {
+        closeEditForm();
+        renderBookmarks();
+        setTimeout(() => bmSearchInput.focus(), 60);
+      }
+    }
+
+    bmBtn.addEventListener("click", () => setBookmarksOpen(bmPanel.hidden));
+
+    // 'B' key toggles bookmarks panel (when not typing in an input)
+    document.addEventListener("keydown", (ev) => {
+      if (ev.key !== "b" && ev.key !== "B") return;
+      if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
+      const target = ev.target;
+      const tag = target && target.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || (target && target.isContentEditable)) return;
+      ev.preventDefault();
+      setBookmarksOpen(bmPanel.hidden);
+    });
+
+    // Live sync across tabs/views editing bookmarks at the same time.
+    try {
+      if (chrome && chrome.storage && chrome.storage.onChanged) {
+        chrome.storage.onChanged.addListener((changes, area) => {
+          if (area !== "local" || !changes[BOOKMARKS_KEY]) return;
+          const next = changes[BOOKMARKS_KEY].newValue;
+          if (!Array.isArray(next)) return;
+          bookmarks = next;
+          refreshAddBtnState();
+          if (!bmPanel.hidden) renderBookmarks();
+        });
+      }
+    } catch {}
+
+    // Initial load.
+    loadBookmarks().then((list) => {
+      bookmarks = list;
+      refreshAddBtnState();
+      if (!bmPanel.hidden) renderBookmarks();
+    });
+
+    // Expose for tests
+    ns.parseTagInput = parseTagInput;
+    ns.deriveBookmarkName = deriveBookmarkName;
+
     // ---------- command palette ----------
     const paletteBtn = root.querySelector('[data-action="palette"]');
     const palette = root.querySelector(".jl-palette");
@@ -2029,6 +2452,8 @@
         { id: "download", label: "Download JSON", hint: "File", icon: ICONS.download, run: () => root.querySelector('[data-action="download"]').click() },
         { id: "schema", label: "Toggle inferred schema panel", hint: "Panel", icon: ICONS.schema, run: () => root.querySelector('[data-action="schema"]').click() },
         { id: "diff", label: "Toggle diff against another URL", hint: "Panel", icon: ICONS.diff, run: () => root.querySelector('[data-action="diff"]').click() },
+        { id: "bookmarks", label: "Toggle bookmarks panel", hint: "B", icon: ICONS.bookmark, run: () => root.querySelector('[data-action="bookmarks"]').click() },
+        { id: "bookmark-add", label: "Bookmark this URL", hint: "Save", icon: ICONS.plus, run: () => { setBookmarksOpen(true); addCurrentAsBookmark(); } },
         { id: "raw", label: inRaw ? "Show interactive tree" : "Show raw JSON text", hint: "View", icon: ICONS.raw, run: () => root.querySelector('[data-action="raw"]').click() },
         { id: "focus-search", label: "Focus search bar", hint: "⌘K", icon: ICONS.search, run: () => { setPaletteOpen(false); searchInput.focus(); searchInput.select(); } },
         { id: "focus-filter", label: "Focus jq-style path filter", hint: "/", icon: ICONS.filter, run: () => { setPaletteOpen(false); filterInput.focus(); filterInput.select(); } },
