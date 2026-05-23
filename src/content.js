@@ -209,6 +209,48 @@
     return { kind: t, size: 0 };
   }
 
+  // ---------- GraphQL detection ----------
+  // A GraphQL response is a JSON object containing at least one of `data` or
+  // `errors`, optionally `extensions`, and no other top-level keys (spec §7).
+  // Heuristic mirrors graphql-spec/draft to avoid false positives on shapes
+  // that merely happen to use `data`.
+  const GQL_ALLOWED_KEYS = new Set(["data", "errors", "extensions"]);
+  function isGraphQLResponse(v) {
+    if (!v || typeof v !== "object" || Array.isArray(v)) return false;
+    const keys = Object.keys(v);
+    if (!keys.length) return false;
+    const hasData = Object.prototype.hasOwnProperty.call(v, "data");
+    const hasErrors = Array.isArray(v.errors);
+    if (!hasData && !hasErrors) return false;
+    for (const k of keys) if (!GQL_ALLOWED_KEYS.has(k)) return false;
+    if (hasErrors) {
+      // errors[] entries must be objects with a `message` string per spec.
+      const sample = v.errors.slice(0, 5);
+      for (const e of sample) {
+        if (!e || typeof e !== "object" || Array.isArray(e)) return false;
+        if (typeof e.message !== "string") return false;
+      }
+    }
+    return true;
+  }
+
+  // Extract a path JSON-pointer-ish for the tree from a GraphQL error.path
+  // (array of segments — strings for field names, numbers for list indices).
+  function gqlErrorPathToTreePath(errPath) {
+    if (!Array.isArray(errPath) || !errPath.length) return "$.data";
+    let out = "$.data";
+    for (const seg of errPath) {
+      if (typeof seg === "number") {
+        out += "[" + seg + "]";
+      } else {
+        const s = String(seg);
+        if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(s)) out += "." + s;
+        else out += '["' + s.replace(/\\/g, "\\\\").replace(/"/g, '\\"') + '"]';
+      }
+    }
+    return out;
+  }
+
   function formatBytes(n) {
     if (n < 1024) return `${n} B`;
     if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
@@ -580,6 +622,8 @@
     history: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 7v5l3.5 2"/></svg>`,
     diffArrow: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/></svg>`,
     csv: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M3.5 9.5h17"/><path d="M3.5 14.5h17"/><path d="M9 9.5v10"/><path d="M15 9.5v10"/></svg>`,
+    graphql: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8.66 5v8L12 21l-8.66-5V8z"/><path d="M12 3l8.66 13H3.34z" opacity="0.55"/><circle cx="12" cy="3" r="1.6" fill="currentColor" stroke="none"/><circle cx="20.66" cy="8" r="1.6" fill="currentColor" stroke="none"/><circle cx="20.66" cy="16" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="21" r="1.6" fill="currentColor" stroke="none"/><circle cx="3.34" cy="16" r="1.6" fill="currentColor" stroke="none"/><circle cx="3.34" cy="8" r="1.6" fill="currentColor" stroke="none"/></svg>`,
+    warn: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4l9 16H3z"/><path d="M12 10v5"/><circle cx="12" cy="17.5" r="0.6" fill="currentColor" stroke="none"/></svg>`,
     pin: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3l7 7-3 1-4 4 1 4-3-1-5 5-1-4-4-1 5-5-1-3 4-4z"/></svg>`,
     pinFilled: `<svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"><path d="M14 3l7 7-3 1-4 4 1 4-3-1-5 5-1-4-4-1 5-5-1-3 4-4z"/></svg>`,
     grip: `<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><circle cx="9" cy="6" r="1.4"/><circle cx="15" cy="6" r="1.4"/><circle cx="9" cy="12" r="1.4"/><circle cx="15" cy="12" r="1.4"/><circle cx="9" cy="18" r="1.4"/><circle cx="15" cy="18" r="1.4"/></svg>`,
@@ -1854,6 +1898,8 @@
 
     const sum = summarize(parsed);
     const sizeLabel = formatBytes(new Blob([rawText]).size);
+    const isGQL = isGraphQLResponse(parsed);
+    const gqlErrorCount = isGQL && Array.isArray(parsed.errors) ? parsed.errors.length : 0;
 
     root.innerHTML = `
       <div class="jl-blobs" aria-hidden="true">
@@ -1872,6 +1918,7 @@
             <span class="jl-dot"></span>
             <span class="jl-stat">${sizeLabel}</span>
             ${PERF_MODE ? `<span class="jl-dot"></span><span class="jl-badge jl-badge-perf" title="Large document — deeper nodes load on expand">perf</span>` : ""}
+            ${isGQL ? `<span class="jl-dot"></span><span class="jl-badge jl-badge-graphql" title="GraphQL response detected">GraphQL${gqlErrorCount ? ` · ${gqlErrorCount} err${gqlErrorCount === 1 ? "" : "s"}` : ""}</span>` : ""}
           </div>
           <div class="jl-actions">
             <button class="jl-btn jl-btn-ghost" data-action="expand" title="Expand all" aria-label="Expand all">${ICONS.expand}</button>
@@ -1883,6 +1930,7 @@
             <button class="jl-btn jl-btn-ghost" data-action="schema" title="Inferred schema" aria-label="Inferred schema" aria-pressed="false">${ICONS.schema}<span>Schema</span></button>
             <button class="jl-btn jl-btn-ghost" data-action="diff" title="Diff against another JSON URL" aria-label="Diff against another JSON URL" aria-pressed="false">${ICONS.diff}<span>Diff</span></button>
             <button class="jl-btn jl-btn-ghost" data-action="jsonpath" title="JSONPath evaluator" aria-label="JSONPath evaluator" aria-pressed="false">${ICONS.jsonpath}<span>JSONPath</span></button>
+            <button class="jl-btn jl-btn-ghost" data-action="graphql" title="GraphQL operation & variables" aria-label="GraphQL panel" aria-pressed="false"${isGQL ? "" : " hidden"}>${ICONS.graphql}<span>GraphQL</span>${gqlErrorCount ? `<span class="jl-gql-count" aria-hidden="true">${gqlErrorCount}</span>` : ""}</button>
             <button class="jl-btn jl-btn-ghost" data-action="bookmarks" title="Bookmarks (B)" aria-label="Bookmarks" aria-pressed="false">${ICONS.bookmark}<span>Bookmarks</span></button>
             <button class="jl-btn jl-btn-ghost" data-action="pins" title="Pinned nodes (P) — drag any row here to pin" aria-label="Pinned nodes" aria-pressed="false">${ICONS.pin}<span>Pins</span><span class="jl-pin-count" aria-hidden="true"></span></button>
             <button class="jl-btn jl-btn-ghost" data-action="history" title="History (H)" aria-label="History timeline" aria-pressed="false">${ICONS.history}<span>History</span><span class="jl-hist-count" aria-hidden="true"></span></button>
@@ -2010,6 +2058,55 @@
             </svg>
             <div class="jl-jp-empty-title">No matches</div>
             <div class="jl-jp-empty-hint">Try <code>$..id</code> for recursive descent or <code>$.items[?(@.qty&gt;0)]</code> with a filter expression.</div>
+          </div>
+        </section>
+        <section class="jl-graphql-panel" hidden aria-label="GraphQL response details">
+          <div class="jl-gql-header">
+            <div class="jl-gql-title">
+              <span class="jl-gql-title-icon" aria-hidden="true">${ICONS.graphql}</span>
+              <span>GraphQL response</span>
+            </div>
+            <div class="jl-gql-summary" aria-live="polite"></div>
+            <div class="jl-gql-tools">
+              <button class="jl-btn jl-btn-ghost jl-gql-copy-op" type="button" title="Copy operation" aria-label="Copy operation">${ICONS.copy}<span>Op</span></button>
+              <button class="jl-btn jl-btn-ghost jl-gql-copy-vars" type="button" title="Copy variables JSON" aria-label="Copy variables JSON">${ICONS.copy}<span>Vars</span></button>
+              <button class="jl-btn jl-btn-ghost jl-gql-close" type="button" title="Close GraphQL panel" aria-label="Close GraphQL panel">${ICONS.close}</button>
+            </div>
+          </div>
+          <div class="jl-gql-tabs" role="tablist">
+            <button type="button" class="jl-gql-tab jl-gql-tab-active" role="tab" data-tab="op" aria-selected="true">Operation</button>
+            <button type="button" class="jl-gql-tab" role="tab" data-tab="vars" aria-selected="false">Variables</button>
+            <button type="button" class="jl-gql-tab" role="tab" data-tab="errors" aria-selected="false">Errors<span class="jl-gql-tab-count" hidden></span></button>
+            <button type="button" class="jl-gql-tab" role="tab" data-tab="ext" aria-selected="false">Extensions</button>
+          </div>
+          <div class="jl-gql-body">
+            <div class="jl-gql-pane jl-gql-pane-op" role="tabpanel">
+              <div class="jl-gql-meta"></div>
+              <pre class="jl-gql-pre jl-gql-op"><code></code></pre>
+            </div>
+            <div class="jl-gql-pane jl-gql-pane-vars" role="tabpanel" hidden>
+              <pre class="jl-gql-pre jl-gql-vars"><code></code></pre>
+            </div>
+            <div class="jl-gql-pane jl-gql-pane-errors" role="tabpanel" hidden>
+              <div class="jl-gql-errors" role="list"></div>
+            </div>
+            <div class="jl-gql-pane jl-gql-pane-ext" role="tabpanel" hidden>
+              <pre class="jl-gql-pre jl-gql-ext"><code></code></pre>
+            </div>
+          </div>
+          <div class="jl-gql-empty" hidden>
+            <svg class="jl-gql-empty-art" viewBox="0 0 160 110" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M80 18l52 30v14L80 92 28 62V48z"/>
+              <path d="M80 18l52 44H28z" opacity="0.45"/>
+              <circle cx="80" cy="18" r="3"/>
+              <circle cx="132" cy="48" r="3"/>
+              <circle cx="132" cy="62" r="3"/>
+              <circle cx="80" cy="92" r="3"/>
+              <circle cx="28" cy="62" r="3"/>
+              <circle cx="28" cy="48" r="3"/>
+            </svg>
+            <div class="jl-gql-empty-title">Nothing here</div>
+            <div class="jl-gql-empty-hint">The response did not include this section.</div>
           </div>
         </section>
         <div class="jl-breadcrumb" hidden role="status" aria-label="JSON path of hovered node">
@@ -3416,6 +3513,220 @@
       } catch { flash(root, "Copy failed"); }
     });
 
+    // ---------- GraphQL panel ----------
+    const gqlBtn = root.querySelector('[data-action="graphql"]');
+    const gqlPanel = root.querySelector('.jl-graphql-panel');
+    const isGqlResp = isGraphQLResponse(parsed);
+    if (gqlBtn) {
+      const gqlSummaryEl = gqlPanel.querySelector('.jl-gql-summary');
+      const gqlMeta = gqlPanel.querySelector('.jl-gql-meta');
+      const gqlOpPre = gqlPanel.querySelector('.jl-gql-op code');
+      const gqlVarsPre = gqlPanel.querySelector('.jl-gql-vars code');
+      const gqlExtPre = gqlPanel.querySelector('.jl-gql-ext code');
+      const gqlErrorsList = gqlPanel.querySelector('.jl-gql-errors');
+      const gqlTabs = gqlPanel.querySelectorAll('.jl-gql-tab');
+      const gqlPanes = {
+        op: gqlPanel.querySelector('.jl-gql-pane-op'),
+        vars: gqlPanel.querySelector('.jl-gql-pane-vars'),
+        errors: gqlPanel.querySelector('.jl-gql-pane-errors'),
+        ext: gqlPanel.querySelector('.jl-gql-pane-ext'),
+      };
+      const gqlTabCount = gqlPanel.querySelector('.jl-gql-tab[data-tab="errors"] .jl-gql-tab-count');
+      const gqlCloseBtn = gqlPanel.querySelector('.jl-gql-close');
+      const gqlCopyOp = gqlPanel.querySelector('.jl-gql-copy-op');
+      const gqlCopyVars = gqlPanel.querySelector('.jl-gql-copy-vars');
+
+      // ---- discover operation & variables ----
+      // GraphQL request fields aren't part of the response body. We attempt
+      // best-effort recovery from (1) URL query params (?query=&variables=)
+      // which apollo/relay/graphql-yoga commonly use for GETs, then (2)
+      // sessionStorage/localStorage keys that some devtools/loggers stash.
+      // None of this calls the network — read-only inspection of the page.
+      function discoverOpFromURL() {
+        try {
+          const u = new URL(location.href);
+          const q = u.searchParams.get('query');
+          const vars = u.searchParams.get('variables');
+          const opName = u.searchParams.get('operationName');
+          if (!q && !vars && !opName) return null;
+          let parsedVars = null;
+          if (vars) { try { parsedVars = JSON.parse(vars); } catch {} }
+          return { source: 'URL params', query: q || '', variables: parsedVars, operationName: opName || '' };
+        } catch { return null; }
+      }
+
+      function inferOperationName(queryText) {
+        if (!queryText) return '';
+        const m = queryText.match(/\b(query|mutation|subscription)\s+([A-Za-z_][A-Za-z0-9_]*)/);
+        return m ? m[2] : '';
+      }
+      function inferOperationKind(queryText) {
+        if (!queryText) return '';
+        const m = queryText.match(/^\s*(query|mutation|subscription)\b/);
+        if (m) return m[1];
+        // Bare selection set is shorthand for `query`.
+        if (/^\s*\{/.test(queryText)) return 'query';
+        return '';
+      }
+
+      const op = discoverOpFromURL();
+      const gqlData = parsed && typeof parsed === 'object' ? parsed.data : undefined;
+      const gqlErrors = Array.isArray(parsed && parsed.errors) ? parsed.errors : [];
+      const gqlExt = parsed && typeof parsed === 'object' ? parsed.extensions : undefined;
+
+      const opQuery = op && op.query ? String(op.query) : '';
+      const opVars = op && op.variables !== undefined ? op.variables : null;
+      const opName = (op && op.operationName) || inferOperationName(opQuery);
+      const opKind = inferOperationKind(opQuery);
+
+      // Populate fields.
+      if (opQuery) {
+        gqlOpPre.textContent = opQuery;
+      } else {
+        gqlOpPre.textContent = '// Operation source not on this page.\n// JSON Lens looks at ?query=&variables= URL params for GET-style GraphQL endpoints.';
+        gqlPanes.op.classList.add('jl-gql-empty-state');
+      }
+      const metaParts = [];
+      if (opKind) metaParts.push(`<span class="jl-gql-kind jl-gql-kind-${opKind}">${opKind}</span>`);
+      if (opName) metaParts.push(`<span class="jl-gql-opname">${opName.replace(/[<>&]/g, (c) => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]))}</span>`);
+      if (op && op.source) metaParts.push(`<span class="jl-gql-source">via ${op.source}</span>`);
+      if (!opQuery && !metaParts.length) metaParts.push('<span class="jl-gql-source">no operation recovered</span>');
+      gqlMeta.innerHTML = metaParts.join('<span class="jl-gql-meta-sep" aria-hidden="true">·</span>');
+
+      if (opVars && typeof opVars === 'object') {
+        try { gqlVarsPre.textContent = JSON.stringify(opVars, null, 2); }
+        catch { gqlVarsPre.textContent = String(opVars); }
+      } else {
+        gqlVarsPre.textContent = '// No variables found.';
+        gqlPanes.vars.classList.add('jl-gql-empty-state');
+      }
+
+      if (gqlExt !== undefined) {
+        try { gqlExtPre.textContent = JSON.stringify(gqlExt, null, 2); }
+        catch { gqlExtPre.textContent = String(gqlExt); }
+      } else {
+        gqlExtPre.textContent = '// Response had no `extensions`.';
+        gqlPanes.ext.classList.add('jl-gql-empty-state');
+      }
+
+      // Errors list with jump-to-path.
+      function renderGqlErrors() {
+        gqlErrorsList.innerHTML = '';
+        if (!gqlErrors.length) {
+          const ok = document.createElement('div');
+          ok.className = 'jl-gql-no-errors';
+          ok.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg><span>No errors</span>';
+          gqlErrorsList.appendChild(ok);
+          return;
+        }
+        for (const err of gqlErrors) {
+          const card = document.createElement('div');
+          card.className = 'jl-gql-err';
+          card.setAttribute('role', 'listitem');
+          const head = document.createElement('div');
+          head.className = 'jl-gql-err-head';
+          const icon = document.createElement('span');
+          icon.className = 'jl-gql-err-icon';
+          icon.innerHTML = ICONS.warn;
+          const msg = document.createElement('div');
+          msg.className = 'jl-gql-err-msg';
+          msg.textContent = String(err.message || '(no message)');
+          head.appendChild(icon);
+          head.appendChild(msg);
+          card.appendChild(head);
+          if (Array.isArray(err.locations) && err.locations.length) {
+            const locs = document.createElement('div');
+            locs.className = 'jl-gql-err-locs';
+            locs.textContent = err.locations.map((l) => `line ${l.line || '?'}, col ${l.column || '?'}`).join('  ·  ');
+            card.appendChild(locs);
+          }
+          if (Array.isArray(err.path) && err.path.length) {
+            const pathRow = document.createElement('div');
+            pathRow.className = 'jl-gql-err-path-row';
+            const label = document.createElement('span');
+            label.className = 'jl-gql-err-path-label';
+            label.textContent = 'path';
+            const treePath = gqlErrorPathToTreePath(err.path);
+            const jump = document.createElement('button');
+            jump.type = 'button';
+            jump.className = 'jl-gql-err-jump';
+            jump.setAttribute('data-path', treePath);
+            jump.title = 'Jump to ' + treePath;
+            jump.innerHTML = `<code>${treePath.replace(/[<>&]/g, (c) => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]))}</code>${ICONS.diffArrow}`;
+            pathRow.appendChild(label);
+            pathRow.appendChild(jump);
+            card.appendChild(pathRow);
+          }
+          if (err.extensions && typeof err.extensions === 'object') {
+            const det = document.createElement('details');
+            det.className = 'jl-gql-err-ext';
+            const sm = document.createElement('summary');
+            sm.textContent = 'extensions';
+            det.appendChild(sm);
+            const pre = document.createElement('pre');
+            try { pre.textContent = JSON.stringify(err.extensions, null, 2); }
+            catch { pre.textContent = String(err.extensions); }
+            det.appendChild(pre);
+            card.appendChild(det);
+          }
+          gqlErrorsList.appendChild(card);
+        }
+      }
+      renderGqlErrors();
+
+      if (gqlErrors.length) {
+        gqlTabCount.hidden = false;
+        gqlTabCount.textContent = String(gqlErrors.length);
+      }
+
+      const dataKind = gqlData === undefined ? 'no data' : (gqlData === null ? 'null data' : (Array.isArray(gqlData) ? 'array data' : (typeof gqlData)));
+      const opLabel = opKind ? `${opKind}${opName ? ' ' + opName : ''}` : (opName || 'operation');
+      gqlSummaryEl.textContent = `${gqlErrors.length ? gqlErrors.length + ' error' + (gqlErrors.length === 1 ? '' : 's') : 'ok'} · ${dataKind} · ${opLabel}`;
+
+      function activateGqlTab(name) {
+        gqlTabs.forEach((t) => {
+          const active = t.getAttribute('data-tab') === name;
+          t.classList.toggle('jl-gql-tab-active', active);
+          t.setAttribute('aria-selected', String(active));
+        });
+        for (const k of Object.keys(gqlPanes)) gqlPanes[k].hidden = (k !== name);
+      }
+      gqlTabs.forEach((t) => t.addEventListener('click', () => activateGqlTab(t.getAttribute('data-tab'))));
+      // Auto-open errors tab if any
+      if (gqlErrors.length) activateGqlTab('errors');
+
+      function setGqlOpen(open) {
+        gqlPanel.hidden = !open;
+        root.classList.toggle('jl-graphql-open', open);
+        gqlBtn.setAttribute('aria-pressed', String(open));
+      }
+      gqlBtn.addEventListener('click', () => setGqlOpen(gqlPanel.hidden));
+      gqlCloseBtn.addEventListener('click', () => setGqlOpen(false));
+      gqlCopyOp.addEventListener('click', async () => {
+        if (!opQuery) { flash(root, 'No operation to copy'); return; }
+        try { await navigator.clipboard.writeText(opQuery); flash(root, 'Operation copied'); }
+        catch { flash(root, 'Copy failed'); }
+      });
+      gqlCopyVars.addEventListener('click', async () => {
+        if (!opVars || typeof opVars !== 'object') { flash(root, 'No variables to copy'); return; }
+        try { await navigator.clipboard.writeText(JSON.stringify(opVars, null, 2)); flash(root, 'Variables copied'); }
+        catch { flash(root, 'Copy failed'); }
+      });
+      gqlErrorsList.addEventListener('click', (ev) => {
+        const btn = ev.target instanceof Element ? ev.target.closest('.jl-gql-err-jump') : null;
+        if (!btn) return;
+        const path = btn.getAttribute('data-path') || '$.data';
+        const node = tree.querySelector(`.jl-node[data-path="${cssEscape(path)}"]`);
+        if (!node) { flash(root, 'Path not in tree'); return; }
+        expandAncestorsOf(node, tree);
+        if (node.classList.contains('jl-collapsed')) setCollapsed(node, false);
+        node.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        const row = node.querySelector(':scope > .jl-row');
+        if (row) { row.classList.add('jl-row-ping'); setTimeout(() => row.classList.remove('jl-row-ping'), 700); }
+      });
+      ns.isGraphQLResponse = isGraphQLResponse;
+    }
+
     // ---------- path breadcrumb on hover ----------
     // Floats at the bottom of the viewer when hovering (or keyboard-focusing)
     // any tree row. Each segment is clickable to jump+expand to that ancestor.
@@ -4082,6 +4393,9 @@
         { id: "schema", label: "Toggle inferred schema panel", hint: "Panel", icon: ICONS.schema, run: () => root.querySelector('[data-action="schema"]').click() },
         { id: "diff", label: "Toggle diff against another URL", hint: "Panel", icon: ICONS.diff, run: () => root.querySelector('[data-action="diff"]').click() },
         { id: "jsonpath", label: "Toggle JSONPath evaluator panel", hint: "Panel", icon: ICONS.jsonpath, run: () => root.querySelector('[data-action="jsonpath"]').click() },
+        ...(isGqlResp ? [
+          { id: "graphql", label: "Toggle GraphQL operation & variables", hint: "Panel", icon: ICONS.graphql, run: () => root.querySelector('[data-action="graphql"]').click() },
+        ] : []),
         { id: "bookmarks", label: "Toggle bookmarks panel", hint: "B", icon: ICONS.bookmark, run: () => root.querySelector('[data-action="bookmarks"]').click() },
         { id: "bookmark-add", label: "Bookmark this URL", hint: "Save", icon: ICONS.plus, run: () => { setBookmarksOpen(true); addCurrentAsBookmark(); } },
         { id: "pins", label: "Toggle pinned nodes panel", hint: "P", icon: ICONS.pin, run: () => setPinsOpen(pinsPanel.hidden) },
