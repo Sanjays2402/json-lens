@@ -1,0 +1,5 @@
+/* JSON Lens — viewer styles (injected on JSON pages).
+   Scaffolding only; populated by later roadmap items. */
+:root[data-json-lens="candidate"] body > pre {
+  /* Reserved hook — actual replacement happens in the auto-detect feature. */
+}
