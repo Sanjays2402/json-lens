@@ -6,7 +6,7 @@ This file is the agent's task queue. Unchecked items get implemented in order. W
 - [x] Auto-detect JSON content-type and replace raw view
 - [x] Collapsible tree view with type badges
 - [x] Live filter bar (jq-style path filtering)
-- [ ] Search keys and values with highlight
+- [x] Search keys and values with highlight
 - [ ] Inferred schema panel (types + counts)
 - [ ] Copy node as TypeScript interface
 - [ ] Copy node as JSON Schema

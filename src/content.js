@@ -92,6 +92,9 @@
     caret: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>`,
     filter: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="6"/><path d="M16 16l4 4"/></svg>`,
     close: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12"/><path d="M18 6l-12 12"/></svg>`,
+    search: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M16.5 16.5L21 21"/></svg>`,
+    arrowUp: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V6"/><path d="M6 12l6-6 6 6"/></svg>`,
+    arrowDown: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v13"/><path d="M6 12l6 6 6-6"/></svg>`,
     expand: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4H5a1 1 0 0 0-1 1v4"/><path d="M15 4h4a1 1 0 0 1 1 1v4"/><path d="M9 20H5a1 1 0 0 1-1-1v-4"/><path d="M15 20h4a1 1 0 0 0 1-1v-4"/></svg>`,
     collapse: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9h5V4"/><path d="M20 9h-5V4"/><path d="M4 15h5v5"/><path d="M20 15h-5v5"/></svg>`,
   };
@@ -331,6 +334,78 @@
     }
   }
 
+  // ---------- search (keys + values) ----------
+  const SEARCH_TARGETS = ".jl-key, .jl-key-index, .jl-str, .jl-num, .jl-bool, .jl-null";
+
+  function escRegex(s) {
+    return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
+  function clearSearch(tree) {
+    tree.classList.remove("jl-searching");
+    tree.querySelectorAll(SEARCH_TARGETS).forEach((el) => {
+      if (el.dataset.jlOrig != null) {
+        el.textContent = el.dataset.jlOrig;
+      }
+    });
+  }
+
+  function highlightInto(el, rx) {
+    if (el.dataset.jlOrig == null) el.dataset.jlOrig = el.textContent || "";
+    const text = el.dataset.jlOrig;
+    rx.lastIndex = 0;
+    let last = 0;
+    let m;
+    let hits = 0;
+    const frag = document.createDocumentFragment();
+    while ((m = rx.exec(text)) !== null) {
+      if (m.index > last) frag.appendChild(document.createTextNode(text.slice(last, m.index)));
+      const mark = document.createElement("mark");
+      mark.className = "jl-hit";
+      mark.textContent = m[0];
+      frag.appendChild(mark);
+      last = m.index + m[0].length;
+      hits++;
+      if (m[0].length === 0) rx.lastIndex++; // guard against zero-width
+    }
+    if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
+    if (hits > 0) {
+      el.textContent = "";
+      el.appendChild(frag);
+    }
+    return hits;
+  }
+
+  function applySearch(tree, query) {
+    const q = String(query || "");
+    if (!q) {
+      clearSearch(tree);
+      return { matches: [], empty: true };
+    }
+    const rx = new RegExp(escRegex(q), "gi");
+    clearSearch(tree);
+    tree.classList.add("jl-searching");
+    const targets = tree.querySelectorAll(SEARCH_TARGETS);
+    const matches = [];
+    targets.forEach((el) => {
+      const hits = highlightInto(el, rx);
+      if (hits > 0) {
+        el.querySelectorAll(":scope > mark.jl-hit").forEach((m) => matches.push(m));
+      }
+    });
+    return { matches };
+  }
+
+  function expandAncestorsOf(el, treeRoot) {
+    let cur = el.closest(".jl-node");
+    while (cur && cur !== treeRoot) {
+      if (cur.classList.contains("jl-collapsed")) setCollapsed(cur, false);
+      const parent = cur.parentElement;
+      cur = parent ? parent.closest(".jl-node") : null;
+    }
+  }
+
+  // ---------- path filter ----------
   function clearFilterClasses(tree) {
     tree.classList.remove("jl-filtering");
     tree.querySelectorAll(".jl-filter-hide,.jl-match,.jl-match-ancestor").forEach((el) => {
@@ -445,6 +520,18 @@
                  aria-label="Filter by jq-style path" />
           <span class="jl-filter-status" aria-live="polite"></span>
           <button class="jl-filter-clear" type="button" title="Clear filter" aria-label="Clear filter" hidden>${ICONS.close}</button>
+        </div>
+        <div class="jl-chrome-search" role="search">
+          <span class="jl-search-icon" aria-hidden="true">${ICONS.search}</span>
+          <input class="jl-search-input" type="text" spellcheck="false" autocomplete="off"
+                 placeholder="Search keys & values — ⌘K"
+                 aria-label="Search keys and values" />
+          <span class="jl-search-status" aria-live="polite"></span>
+          <div class="jl-search-nav" role="group" aria-label="Search navigation">
+            <button class="jl-search-prev" type="button" title="Previous match (Shift+Enter)" aria-label="Previous match" disabled>${ICONS.arrowUp}</button>
+            <button class="jl-search-next" type="button" title="Next match (Enter)" aria-label="Next match" disabled>${ICONS.arrowDown}</button>
+          </div>
+          <button class="jl-search-clear" type="button" title="Clear search (Esc)" aria-label="Clear search" hidden>${ICONS.close}</button>
         </div>
       </header>
       <main class="jl-viewport">
@@ -571,6 +658,101 @@
         if (tag === "INPUT" || tag === "TEXTAREA" || (target && target.isContentEditable)) return;
         filterInput.focus();
         filterInput.select();
+        ev.preventDefault();
+      }
+    });
+
+    // ---------- search wiring ----------
+    const searchInput = root.querySelector(".jl-search-input");
+    const searchStatus = root.querySelector(".jl-search-status");
+    const searchClear = root.querySelector(".jl-search-clear");
+    const searchPrev = root.querySelector(".jl-search-prev");
+    const searchNext = root.querySelector(".jl-search-next");
+    const searchRow = root.querySelector(".jl-chrome-search");
+    let searchMatches = [];
+    let searchIdx = -1;
+    let searchTimer = 0;
+
+    const setActiveMatch = (next) => {
+      if (!searchMatches.length) {
+        searchIdx = -1;
+        searchStatus.textContent = "";
+        return;
+      }
+      // remove old active
+      const prevActive = tree.querySelector(".jl-hit.jl-hit-active");
+      if (prevActive) prevActive.classList.remove("jl-hit-active");
+      const n = searchMatches.length;
+      searchIdx = ((next % n) + n) % n;
+      const cur = searchMatches[searchIdx];
+      cur.classList.add("jl-hit-active");
+      expandAncestorsOf(cur, tree);
+      cur.scrollIntoView({ block: "center", behavior: "smooth" });
+      searchStatus.textContent = `${searchIdx + 1} / ${n}`;
+    };
+
+    const runSearch = (value) => {
+      const has = value.length > 0;
+      searchClear.hidden = !has;
+      searchRow.classList.toggle("jl-search-active", has);
+      if (!has) {
+        clearSearch(tree);
+        searchMatches = [];
+        searchIdx = -1;
+        searchStatus.textContent = "";
+        searchPrev.disabled = true;
+        searchNext.disabled = true;
+        searchRow.classList.remove("jl-search-empty");
+        return;
+      }
+      const { matches } = applySearch(tree, value);
+      searchMatches = matches;
+      searchPrev.disabled = matches.length < 2;
+      searchNext.disabled = matches.length < 2;
+      searchRow.classList.toggle("jl-search-empty", matches.length === 0);
+      if (matches.length === 0) {
+        searchIdx = -1;
+        searchStatus.textContent = "no matches";
+        return;
+      }
+      setActiveMatch(0);
+    };
+
+    searchInput.addEventListener("input", () => {
+      const val = searchInput.value;
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(() => runSearch(val), 80);
+    });
+    searchInput.addEventListener("keydown", (ev) => {
+      if (ev.key === "Escape") {
+        searchInput.value = "";
+        runSearch("");
+        ev.preventDefault();
+        return;
+      }
+      if (ev.key === "Enter") {
+        if (!searchMatches.length) return;
+        setActiveMatch(searchIdx + (ev.shiftKey ? -1 : 1));
+        ev.preventDefault();
+      }
+    });
+    searchPrev.addEventListener("click", () => {
+      if (searchMatches.length) setActiveMatch(searchIdx - 1);
+    });
+    searchNext.addEventListener("click", () => {
+      if (searchMatches.length) setActiveMatch(searchIdx + 1);
+    });
+    searchClear.addEventListener("click", () => {
+      searchInput.value = "";
+      runSearch("");
+      searchInput.focus();
+    });
+    // ⌘K / Ctrl+K focuses search
+    document.addEventListener("keydown", (ev) => {
+      const mod = ev.metaKey || ev.ctrlKey;
+      if (mod && (ev.key === "k" || ev.key === "K")) {
+        searchInput.focus();
+        searchInput.select();
         ev.preventDefault();
       }
     });
