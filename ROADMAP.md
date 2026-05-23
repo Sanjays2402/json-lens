@@ -4,7 +4,7 @@ This file is the agent's task queue. Unchecked items get implemented in order. W
 
 - [x] MV3 manifest + content script scaffolding
 - [x] Auto-detect JSON content-type and replace raw view
-- [ ] Collapsible tree view with type badges
+- [x] Collapsible tree view with type badges
 - [ ] Live filter bar (jq-style path filtering)
 - [ ] Search keys and values with highlight
 - [ ] Inferred schema panel (types + counts)
