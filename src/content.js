@@ -262,7 +262,53 @@
     command: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3z"/></svg>`,
     sparkle: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4l1.6 4.4L18 10l-4.4 1.6L12 16l-1.6-4.4L6 10l4.4-1.6z"/><path d="M19 16l.7 1.8L21.5 18.5l-1.8.7L19 21l-.7-1.8L16.5 18.5l1.8-.7z"/></svg>`,
     enterKey: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 7v5a3 3 0 0 1-3 3H6"/><path d="M10 11l-4 4 4 4"/></svg>`,
+    sun: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4L7 17M17 7l1.4-1.4"/></svg>`,
+    moon: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>`,
+    auto: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><path d="M12 4v16"/><path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor" stroke="none" opacity="0.5"/></svg>`,
   };
+
+  // ---------- theme ----------
+  const THEME_KEY = "json-lens:theme";
+  const THEME_MODES = ["auto", "light", "dark"];
+  let _themeMql = null;
+  function readThemePref() {
+    try {
+      const v = localStorage.getItem(THEME_KEY);
+      return THEME_MODES.includes(v) ? v : "auto";
+    } catch { return "auto"; }
+  }
+  function resolvedTheme(pref) {
+    if (pref === "light" || pref === "dark") return pref;
+    try {
+      if (!_themeMql) _themeMql = window.matchMedia("(prefers-color-scheme: light)");
+      return _themeMql.matches ? "light" : "dark";
+    } catch { return "dark"; }
+  }
+  function applyTheme(pref) {
+    const resolved = resolvedTheme(pref);
+    const html = document.documentElement;
+    if (resolved === "light") html.setAttribute("data-jl-theme", "light");
+    else html.removeAttribute("data-jl-theme");
+  }
+  function setThemePref(pref) {
+    if (!THEME_MODES.includes(pref)) pref = "auto";
+    try { localStorage.setItem(THEME_KEY, pref); } catch {}
+    applyTheme(pref);
+    // sync any switch UI in DOM
+    document.querySelectorAll("#json-lens-root .jl-theme-switch button").forEach((b) => {
+      b.setAttribute("aria-pressed", b.dataset.theme === pref ? "true" : "false");
+    });
+  }
+  function bindThemeAutoListener() {
+    if (!_themeMql) {
+      try { _themeMql = window.matchMedia("(prefers-color-scheme: light)"); } catch { return; }
+    }
+    const onChange = () => {
+      if (readThemePref() === "auto") applyTheme("auto");
+    };
+    if (_themeMql.addEventListener) _themeMql.addEventListener("change", onChange);
+    else if (_themeMql.addListener) _themeMql.addListener(onChange);
+  }
 
   // ---------- TypeScript interface generation ----------
   // Recursively walks a value and produces a deterministic TS source string.
@@ -1197,6 +1243,11 @@
             <button class="jl-btn jl-btn-ghost" data-action="diff" title="Diff against another JSON URL" aria-label="Diff against another JSON URL" aria-pressed="false">${ICONS.diff}<span>Diff</span></button>
             <button class="jl-btn jl-btn-ghost" data-action="palette" title="Command palette (⌘⇧P)" aria-label="Command palette">${ICONS.command}<span>Actions</span></button>
             <button class="jl-btn jl-btn-ghost" data-action="raw" title="Toggle raw view" aria-label="Toggle raw view">${ICONS.raw}<span>Raw</span></button>
+            <div class="jl-theme-switch" role="group" aria-label="Theme">
+              <button type="button" data-theme="auto" title="Auto theme" aria-label="Auto theme" aria-pressed="false">${ICONS.auto}</button>
+              <button type="button" data-theme="light" title="Light theme" aria-label="Light theme" aria-pressed="false">${ICONS.sun}</button>
+              <button type="button" data-theme="dark" title="Dark theme" aria-label="Dark theme" aria-pressed="false">${ICONS.moon}</button>
+            </div>
           </div>
         </div>
         <div class="jl-chrome-filter" role="search">
@@ -1432,6 +1483,21 @@
       setAllCollapsed(tree, true);
       flash(root, "Collapsed");
     });
+    // ---------- theme switch wiring ----------
+    const themeSwitch = root.querySelector(".jl-theme-switch");
+    if (themeSwitch) {
+      const current = readThemePref();
+      themeSwitch.querySelectorAll("button").forEach((b) => {
+        b.setAttribute("aria-pressed", b.dataset.theme === current ? "true" : "false");
+      });
+      themeSwitch.addEventListener("click", (ev) => {
+        const btn = ev.target.closest("button[data-theme]");
+        if (!btn) return;
+        const next = btn.dataset.theme;
+        setThemePref(next);
+        flash(root, next === "auto" ? "Theme: auto" : next === "light" ? "Theme: light" : "Theme: dark");
+      });
+    }
     // ---------- filter wiring ----------
     const filterInput = root.querySelector(".jl-filter-input");
     const filterStatus = root.querySelector(".jl-filter-status");
@@ -2121,6 +2187,8 @@
     STATE.perfMode = PERF_MODE;
 
     injectStylesheet();
+    applyTheme(readThemePref());
+    bindThemeAutoListener();
     const shell = buildShell(parsed.value, rawText);
 
     pre.style.display = "none";
