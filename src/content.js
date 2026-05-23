@@ -257,6 +257,8 @@
     minify: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 8h14"/><path d="M7 12h10"/><path d="M9 16h6"/></svg>`,
     pretty: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h6"/><path d="M4 10h10"/><path d="M4 14h8"/><path d="M4 18h12"/></svg>`,
     diff: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v14"/><path d="M5 6l3-3 3 3"/><path d="M16 21V7"/><path d="M19 18l-3 3-3-3"/></svg>`,
+    home: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11l8-7 8 7"/><path d="M6 10v9a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-9"/></svg>`,
+    crumbSep: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 6l6 6-6 6"/></svg>`,
   };
 
   // ---------- TypeScript interface generation ----------
@@ -1196,6 +1198,10 @@
             </div>
           </div>
         </section>
+        <div class="jl-breadcrumb" hidden role="status" aria-label="JSON path of hovered node">
+          <div class="jl-crumbs" role="list"></div>
+          <button class="jl-crumb-copy" type="button" title="Copy path" aria-label="Copy path">${ICONS.copy}</button>
+        </div>
       </main>
     `;
 
@@ -1647,11 +1653,145 @@
     // Expose for debugging/tests
     ns.computeDiff = computeDiff;
 
+    // ---------- path breadcrumb on hover ----------
+    // Floats at the bottom of the viewer when hovering (or keyboard-focusing)
+    // any tree row. Each segment is clickable to jump+expand to that ancestor.
+    const crumbBar = root.querySelector(".jl-breadcrumb");
+    const crumbList = root.querySelector(".jl-crumbs");
+    const crumbCopyBtn = root.querySelector(".jl-crumb-copy");
+    let crumbHideTimer = 0;
+    let crumbCurrentPath = "";
+
+    function parsePathSegments(pathStr) {
+      const segs = [{ kind: "root", path: "$", label: "$" }];
+      if (!pathStr || pathStr === "$") return segs;
+      let consumed = 1;
+      PATH_TOKEN_RE.lastIndex = consumed;
+      let m;
+      while ((m = PATH_TOKEN_RE.exec(pathStr)) !== null) {
+        if (m.index !== consumed) break;
+        consumed = PATH_TOKEN_RE.lastIndex;
+        const subPath = pathStr.slice(0, consumed);
+        if (m[1] !== undefined) {
+          segs.push({ kind: "key", path: subPath, label: m[1] });
+        } else if (m[2] !== undefined) {
+          segs.push({ kind: "index", path: subPath, label: m[2] });
+        } else {
+          const key = m[3].replace(/\\"/g, '"').replace(/\\\\/g, "\\");
+          segs.push({ kind: "key", path: subPath, label: key, quoted: true });
+        }
+      }
+      return segs;
+    }
+
+    function renderBreadcrumb(pathStr) {
+      crumbCurrentPath = pathStr || "$";
+      const segs = parsePathSegments(crumbCurrentPath);
+      crumbList.innerHTML = "";
+      segs.forEach((seg, i) => {
+        if (i > 0) {
+          const sep = document.createElement("span");
+          sep.className = "jl-crumb-sep";
+          sep.setAttribute("aria-hidden", "true");
+          sep.innerHTML = ICONS.crumbSep;
+          crumbList.appendChild(sep);
+        }
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "jl-crumb";
+        btn.setAttribute("data-kind", seg.kind);
+        btn.setAttribute("data-path", seg.path);
+        btn.setAttribute("role", "listitem");
+        btn.title = `Jump to ${seg.path}`;
+        if (i === segs.length - 1) btn.classList.add("jl-crumb-current");
+        if (seg.kind === "root") {
+          btn.innerHTML = `<span class="jl-crumb-icon" aria-hidden="true">${ICONS.home}</span><span class="jl-crumb-label">root</span>`;
+        } else if (seg.kind === "index") {
+          btn.innerHTML = `<span class="jl-crumb-bracket">[</span><span class="jl-crumb-label jl-crumb-index">${seg.label}</span><span class="jl-crumb-bracket">]</span>`;
+        } else {
+          const safe = String(seg.label).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+          btn.innerHTML = `<span class="jl-crumb-label">${safe}</span>`;
+        }
+        crumbList.appendChild(btn);
+      });
+    }
+
+    function showBreadcrumb(pathStr) {
+      clearTimeout(crumbHideTimer);
+      if (!pathStr) return;
+      renderBreadcrumb(pathStr);
+      if (crumbBar.hidden) {
+        crumbBar.hidden = false;
+        // force reflow so the transition fires
+        // eslint-disable-next-line no-unused-expressions
+        crumbBar.offsetWidth;
+      }
+      crumbBar.classList.add("jl-breadcrumb-show");
+    }
+
+    function hideBreadcrumb(immediate) {
+      clearTimeout(crumbHideTimer);
+      const finish = () => {
+        crumbBar.classList.remove("jl-breadcrumb-show");
+        crumbHideTimer = setTimeout(() => { crumbBar.hidden = true; }, 220);
+      };
+      if (immediate) finish();
+      else crumbHideTimer = setTimeout(finish, 140);
+    }
+
+    function pathFromEvent(target) {
+      if (!(target instanceof Element)) return null;
+      const node = target.closest(".jl-node");
+      if (!node || !tree.contains(node)) return null;
+      return node.getAttribute("data-path") || "$";
+    }
+
+    tree.addEventListener("mouseover", (ev) => {
+      const p = pathFromEvent(ev.target);
+      if (p) showBreadcrumb(p);
+    });
+    tree.addEventListener("mouseleave", () => hideBreadcrumb(false));
+    tree.addEventListener("focusin", (ev) => {
+      const p = pathFromEvent(ev.target);
+      if (p) showBreadcrumb(p);
+    });
+    crumbBar.addEventListener("mouseenter", () => { clearTimeout(crumbHideTimer); });
+    crumbBar.addEventListener("mouseleave", () => hideBreadcrumb(false));
+
+    crumbList.addEventListener("click", (ev) => {
+      const btn = ev.target instanceof Element ? ev.target.closest(".jl-crumb") : null;
+      if (!btn) return;
+      const path = btn.getAttribute("data-path") || "$";
+      const node = tree.querySelector(`.jl-node[data-path="${cssEscape(path)}"]`);
+      if (!node) { flash(root, "Path not in view"); return; }
+      expandAncestorsOf(node, tree);
+      if (node.classList.contains("jl-collapsed")) setCollapsed(node, false);
+      node.scrollIntoView({ block: "center", behavior: "smooth" });
+      const row = node.querySelector(":scope > .jl-row");
+      if (row) {
+        row.classList.add("jl-row-ping");
+        setTimeout(() => row.classList.remove("jl-row-ping"), 900);
+      }
+    });
+
+    crumbCopyBtn.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(crumbCurrentPath || "$");
+        flash(root, `Copied ${crumbCurrentPath || "$"}`);
+      } catch { flash(root, "Copy failed"); }
+    });
+
+    function cssEscape(s) {
+      if (typeof CSS !== "undefined" && CSS.escape) return CSS.escape(s);
+      return String(s).replace(/["\\]/g, "\\$&");
+    }
+
     root.querySelector('[data-action="raw"]').addEventListener("click", () => {
       const inRaw = root.classList.toggle("jl-raw-mode");
       const rawEl = root.querySelector(".jl-raw");
       const host = root.querySelector(".jl-tree-host");
       if (inRaw) {
+        hideBreadcrumb(true);
         rawEl.querySelector("code").textContent = serialize();
         rawEl.hidden = false;
         host.hidden = true;
