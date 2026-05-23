@@ -272,6 +272,8 @@
     plus: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>`,
     externalLink: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6"/><path d="M20 4l-9 9"/><path d="M19 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5"/></svg>`,
     pencil: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4l10-10-4-4L4 16z"/><path d="M14 6l4 4"/></svg>`,
+    jsonpath: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h3a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2H4"/><path d="M20 6h-3a2 2 0 0 0-2 2v2a2 2 0 0 0 2 2h3"/><path d="M9 14l2 4 2-8 2 4"/></svg>`,
+    play: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 5v14l11-7z"/></svg>`,
   };
 
   // ---------- bookmarks ----------
@@ -1335,6 +1337,7 @@
             <button class="jl-btn" data-action="download" title="Download JSON" aria-label="Download JSON">${ICONS.download}<span>Save</span></button>
             <button class="jl-btn jl-btn-ghost" data-action="schema" title="Inferred schema" aria-label="Inferred schema" aria-pressed="false">${ICONS.schema}<span>Schema</span></button>
             <button class="jl-btn jl-btn-ghost" data-action="diff" title="Diff against another JSON URL" aria-label="Diff against another JSON URL" aria-pressed="false">${ICONS.diff}<span>Diff</span></button>
+            <button class="jl-btn jl-btn-ghost" data-action="jsonpath" title="JSONPath evaluator" aria-label="JSONPath evaluator" aria-pressed="false">${ICONS.jsonpath}<span>JSONPath</span></button>
             <button class="jl-btn jl-btn-ghost" data-action="bookmarks" title="Bookmarks (B)" aria-label="Bookmarks" aria-pressed="false">${ICONS.bookmark}<span>Bookmarks</span></button>
             <button class="jl-btn jl-btn-ghost" data-action="palette" title="Command palette (⌘⇧P)" aria-label="Command palette">${ICONS.command}<span>Actions</span></button>
             <button class="jl-btn jl-btn-ghost" data-action="raw" title="Toggle raw view" aria-label="Toggle raw view">${ICONS.raw}<span>Raw</span></button>
@@ -1421,6 +1424,45 @@
               <div class="jl-diff-pane-header"><span class="jl-diff-tag" data-side="b">B</span><span class="jl-diff-pane-meta"></span></div>
               <div class="jl-diff-pane-body"></div>
             </div>
+          </div>
+        </section>
+        <section class="jl-jsonpath-panel" hidden aria-label="JSONPath evaluator">
+          <div class="jl-jp-header">
+            <div class="jl-jp-title">
+              <span class="jl-jp-title-icon" aria-hidden="true">${ICONS.jsonpath}</span>
+              <span>JSONPath evaluator</span>
+            </div>
+            <div class="jl-jp-summary" aria-live="polite"></div>
+            <div class="jl-jp-tools">
+              <button class="jl-btn jl-btn-ghost jl-jp-copy" type="button" title="Copy matches as JSON" aria-label="Copy matches as JSON">${ICONS.copy}<span>Copy</span></button>
+              <button class="jl-btn jl-btn-ghost jl-jp-close" type="button" title="Close JSONPath" aria-label="Close JSONPath evaluator">${ICONS.close}</button>
+            </div>
+          </div>
+          <form class="jl-jp-form" autocomplete="off">
+            <span class="jl-jp-prefix" aria-hidden="true">${ICONS.jsonpath}</span>
+            <input class="jl-jp-input" type="text" spellcheck="false" autocomplete="off"
+                   placeholder="JSONPath — $.store.book[*].author, $..price, $.items[?(@.qty>0)].id"
+                   aria-label="JSONPath expression" />
+            <button class="jl-btn jl-jp-run" type="submit" title="Evaluate (Enter)" aria-label="Evaluate expression">${ICONS.play}<span>Run</span></button>
+          </form>
+          <div class="jl-jp-status" aria-live="polite"></div>
+          <div class="jl-jp-examples" aria-label="Examples">
+            <span class="jl-jp-examples-label">Try</span>
+            <button class="jl-jp-chip" type="button" data-jp="$.*">$.*</button>
+            <button class="jl-jp-chip" type="button" data-jp="$..*">$..*</button>
+            <button class="jl-jp-chip" type="button" data-jp="$[0]">$[0]</button>
+            <button class="jl-jp-chip" type="button" data-jp="$..id">$..id</button>
+          </div>
+          <div class="jl-jp-body" role="list"></div>
+          <div class="jl-jp-empty" hidden>
+            <svg class="jl-jp-empty-art" viewBox="0 0 160 110" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M30 86c8-14 18-24 30-30s24-8 36-6" opacity="0.45"/>
+              <circle cx="96" cy="50" r="22"/>
+              <path d="M112 66l14 14"/>
+              <path d="M88 50h16M96 42v16" opacity="0.6"/>
+            </svg>
+            <div class="jl-jp-empty-title">No matches</div>
+            <div class="jl-jp-empty-hint">Try <code>$..id</code> for recursive descent or <code>$.items[?(@.qty&gt;0)]</code> with a filter expression.</div>
           </div>
         </section>
         <div class="jl-breadcrumb" hidden role="status" aria-label="JSON path of hovered node">
@@ -2020,6 +2062,458 @@
     // Expose for debugging/tests
     ns.computeDiff = computeDiff;
 
+    // ---------- JSONPath evaluator ----------
+    // A subset of Stefan Gössner's JSONPath spec, enough to be useful without
+    // pulling a dependency or eval-ing arbitrary JS:
+    //   $              root
+    //   .key  ['key']  child (dot or bracket-quoted)
+    //   .*    [*]      wildcard (all children / elements)
+    //   ..key  ..*     recursive descent
+    //   [N]            array index (negative ok)
+    //   [a,b,c]        union of indices/keys
+    //   [start:end:step] slice
+    //   [?(<expr>)]    filter; expr supports @.<key> / @['k'] / @, numeric &
+    //                  string literals, ==, !=, <, <=, >, >=, &&, ||, !, parens
+    function jpTokenize(input) {
+      const s = String(input || "").trim();
+      if (!s) return { error: "empty expression" };
+      let i = 0;
+      if (s[i] === "$") i++;
+      else if (s[i] !== "." && s[i] !== "[") return { error: "must start with $" };
+      const tokens = [{ kind: "root" }];
+      while (i < s.length) {
+        const ch = s[i];
+        if (ch === "." && s[i + 1] === ".") {
+          i += 2;
+          if (s[i] === "*") { tokens.push({ kind: "rdesc", wildcard: true }); i++; }
+          else if (s[i] === "[") {
+            // ..[ — recurse then bracket; emit rdesc-all marker then bracket
+            tokens.push({ kind: "rdesc", wildcard: true });
+            // re-process bracket on next iter
+          } else {
+            const m = /^[A-Za-z_$][\w$]*/.exec(s.slice(i));
+            if (!m) return { error: "expected identifier after '..'" };
+            tokens.push({ kind: "rdesc", name: m[0] });
+            i += m[0].length;
+          }
+        } else if (ch === ".") {
+          i++;
+          if (s[i] === "*") { tokens.push({ kind: "wildcard" }); i++; }
+          else {
+            const m = /^[A-Za-z_$][\w$]*/.exec(s.slice(i));
+            if (!m) return { error: "expected identifier after '.'" };
+            tokens.push({ kind: "key", name: m[0] });
+            i += m[0].length;
+          }
+        } else if (ch === "[") {
+          // find matching ']' — respect quoted strings
+          let j = i + 1, depth = 1, inStr = null;
+          while (j < s.length && depth) {
+            const c = s[j];
+            if (inStr) {
+              if (c === "\\") j += 2;
+              else { if (c === inStr) inStr = null; j++; }
+            } else if (c === "'" || c === '"') { inStr = c; j++; }
+            else if (c === "[") { depth++; j++; }
+            else if (c === "]") { depth--; if (!depth) break; j++; }
+            else j++;
+          }
+          if (depth) return { error: "missing ']'" };
+          const inner = s.slice(i + 1, j).trim();
+          i = j + 1;
+          if (inner === "*") tokens.push({ kind: "wildcard" });
+          else if (/^-?\d+$/.test(inner)) tokens.push({ kind: "index", value: Number(inner) });
+          else if (inner.startsWith("?")) {
+            // [?(<expr>)] or [?<expr>]
+            let expr = inner.slice(1).trim();
+            if (expr.startsWith("(") && expr.endsWith(")")) expr = expr.slice(1, -1);
+            tokens.push({ kind: "filter", expr });
+          } else if (inner.includes(":") && !/^['"]/.test(inner)) {
+            const parts = inner.split(":").map((p) => p.trim());
+            const toN = (p) => p === "" ? undefined : Number(p);
+            const start = toN(parts[0]); const end = toN(parts[1]); const step = toN(parts[2]);
+            if ([start, end, step].some((v) => v !== undefined && Number.isNaN(v))) return { error: "bad slice" };
+            tokens.push({ kind: "slice", start, end, step });
+          } else if (inner.includes(",")) {
+            const parts = splitUnion(inner);
+            if (!parts) return { error: "bad union" };
+            tokens.push({ kind: "union", parts });
+          } else if (/^['"]/.test(inner)) {
+            const q = inner[0];
+            if (!inner.endsWith(q) || inner.length < 2) return { error: "bad quoted key" };
+            tokens.push({ kind: "key", name: unquote(inner) });
+          } else return { error: "bad bracket: " + inner };
+        } else {
+          return { error: "unexpected '" + ch + "'" };
+        }
+      }
+      return { tokens };
+    }
+    function splitUnion(inner) {
+      const out = [];
+      let i = 0, buf = "", inStr = null;
+      while (i < inner.length) {
+        const c = inner[i];
+        if (inStr) { buf += c; if (c === "\\") { buf += inner[i + 1] || ""; i += 2; continue; } if (c === inStr) inStr = null; i++; continue; }
+        if (c === "'" || c === '"') { inStr = c; buf += c; i++; continue; }
+        if (c === ",") { out.push(buf.trim()); buf = ""; i++; continue; }
+        buf += c; i++;
+      }
+      if (inStr) return null;
+      if (buf.trim() !== "") out.push(buf.trim());
+      return out.map((p) => {
+        if (/^-?\d+$/.test(p)) return { kind: "index", value: Number(p) };
+        if (/^['"]/.test(p)) return { kind: "key", name: unquote(p) };
+        return { kind: "key", name: p };
+      });
+    }
+    function unquote(p) {
+      const q = p[0];
+      return p.slice(1, -1).replace(new RegExp("\\\\" + q, "g"), q).replace(/\\\\/g, "\\");
+    }
+
+    // Filter expression parser — produces a predicate (ctx) => boolean.
+    function compileFilterExpr(src) {
+      const toks = [];
+      let i = 0;
+      const s = String(src);
+      while (i < s.length) {
+        const c = s[i];
+        if (/\s/.test(c)) { i++; continue; }
+        if (c === "@") { toks.push({ t: "cur" }); i++; continue; }
+        if (c === "(" || c === ")") { toks.push({ t: c }); i++; continue; }
+        if (c === "!" && s[i + 1] !== "=") { toks.push({ t: "!" }); i++; continue; }
+        if (c === "&" && s[i + 1] === "&") { toks.push({ t: "&&" }); i += 2; continue; }
+        if (c === "|" && s[i + 1] === "|") { toks.push({ t: "||" }); i += 2; continue; }
+        if (c === "=" && s[i + 1] === "=") { toks.push({ t: "cmp", v: "==" }); i += 2; continue; }
+        if (c === "!" && s[i + 1] === "=") { toks.push({ t: "cmp", v: "!=" }); i += 2; continue; }
+        if ((c === "<" || c === ">") && s[i + 1] === "=") { toks.push({ t: "cmp", v: c + "=" }); i += 2; continue; }
+        if (c === "<" || c === ">") { toks.push({ t: "cmp", v: c }); i++; continue; }
+        if (c === "." && toks.length && toks[toks.length - 1].t === "cur") {
+          // @.identifier  / @.* not supported here; consume identifier as accessor on prev cur node
+          i++;
+          const m = /^[A-Za-z_$][\w$]*/.exec(s.slice(i));
+          if (!m) return { error: "expected identifier after '@.'" };
+          const prev = toks[toks.length - 1];
+          prev.path = (prev.path || []).concat([m[0]]);
+          i += m[0].length;
+          continue;
+        }
+        if (c === "[" && toks.length && toks[toks.length - 1].t === "cur") {
+          const end = s.indexOf("]", i);
+          if (end < 0) return { error: "missing ']' in @[…]" };
+          const inside = s.slice(i + 1, end).trim();
+          let key;
+          if (/^['"]/.test(inside)) key = unquote(inside);
+          else if (/^-?\d+$/.test(inside)) key = Number(inside);
+          else return { error: "unsupported @[…]" };
+          const prev = toks[toks.length - 1];
+          prev.path = (prev.path || []).concat([key]);
+          i = end + 1;
+          continue;
+        }
+        if (c === "'" || c === '"') {
+          let j = i + 1;
+          while (j < s.length && s[j] !== c) { if (s[j] === "\\") j++; j++; }
+          if (j >= s.length) return { error: "unterminated string" };
+          toks.push({ t: "lit", v: s.slice(i + 1, j).replace(/\\(.)/g, "$1") });
+          i = j + 1; continue;
+        }
+        if (/[-0-9.]/.test(c)) {
+          const m = /^-?\d+(?:\.\d+)?/.exec(s.slice(i));
+          if (m) { toks.push({ t: "lit", v: Number(m[0]) }); i += m[0].length; continue; }
+        }
+        if (/[A-Za-z_]/.test(c)) {
+          const m = /^[A-Za-z_][\w]*/.exec(s.slice(i));
+          const word = m[0]; i += word.length;
+          if (word === "true") toks.push({ t: "lit", v: true });
+          else if (word === "false") toks.push({ t: "lit", v: false });
+          else if (word === "null") toks.push({ t: "lit", v: null });
+          else return { error: "unknown identifier '" + word + "'" };
+          continue;
+        }
+        return { error: "unexpected '" + c + "'" };
+      }
+      // Pratt-ish recursive descent: or > and > not > cmp > primary
+      let p = 0;
+      function peek() { return toks[p]; }
+      function eat(t, v) { const tk = toks[p]; if (!tk) return null; if (tk.t === t && (v === undefined || tk.v === v)) { p++; return tk; } return null; }
+      function getCur(node, accessors) {
+        if (!accessors || !accessors.length) return node;
+        let cur = node;
+        for (const a of accessors) {
+          if (cur == null) return undefined;
+          cur = cur[a];
+        }
+        return cur;
+      }
+      function parsePrimary() {
+        const tk = toks[p];
+        if (!tk) return { error: "unexpected end" };
+        if (tk.t === "(") { p++; const e = parseOr(); if (e.error) return e; if (!eat(")")) return { error: "missing ')'" }; return e; }
+        if (tk.t === "!") { p++; const e = parsePrimary(); if (e.error) return e; return { fn: (n) => !e.fn(n) }; }
+        if (tk.t === "lit") { p++; return { fn: () => tk.v, isLit: true, val: tk.v }; }
+        if (tk.t === "cur") { p++; const acc = tk.path || []; return { fn: (n) => getCur(n, acc), isCur: true }; }
+        return { error: "unexpected token" };
+      }
+      function parseCmp() {
+        const left = parsePrimary(); if (left.error) return left;
+        const tk = peek();
+        if (tk && tk.t === "cmp") {
+          p++;
+          const right = parsePrimary(); if (right.error) return right;
+          const op = tk.v;
+          return { fn: (n) => {
+            const a = left.fn(n), b = right.fn(n);
+            switch (op) {
+              case "==": return a == b;
+              case "!=": return a != b;
+              case "<": return a < b;
+              case "<=": return a <= b;
+              case ">": return a > b;
+              case ">=": return a >= b;
+            }
+            return false;
+          }};
+        }
+        // truthy fallback (e.g. ?(@.flag))
+        return { fn: (n) => Boolean(left.fn(n)) };
+      }
+      function parseAnd() {
+        let left = parseCmp(); if (left.error) return left;
+        while (peek() && peek().t === "&&") { p++; const r = parseCmp(); if (r.error) return r; const L = left; left = { fn: (n) => L.fn(n) && r.fn(n) }; }
+        return left;
+      }
+      function parseOr() {
+        let left = parseAnd(); if (left.error) return left;
+        while (peek() && peek().t === "||") { p++; const r = parseAnd(); if (r.error) return r; const L = left; left = { fn: (n) => L.fn(n) || r.fn(n) }; }
+        return left;
+      }
+      const out = parseOr();
+      if (out.error) return out;
+      if (p !== toks.length) return { error: "trailing tokens at " + p };
+      return { predicate: (n) => Boolean(out.fn(n)) };
+    }
+
+    function evalJsonPath(rootVal, expr) {
+      const tk = jpTokenize(expr);
+      if (tk.error) return { error: tk.error };
+      // Each result item: { value, path: string (e.g. $.a[0].b) }
+      let current = [{ value: rootVal, path: "$" }];
+      for (const t of tk.tokens) {
+        if (t.kind === "root") continue;
+        const next = [];
+        if (t.kind === "key") {
+          for (const c of current) {
+            const v = c.value;
+            if (v && typeof v === "object" && !Array.isArray(v) && Object.prototype.hasOwnProperty.call(v, t.name)) {
+              next.push({ value: v[t.name], path: joinPath(c.path, t.name) });
+            }
+          }
+        } else if (t.kind === "wildcard") {
+          for (const c of current) {
+            const v = c.value;
+            if (Array.isArray(v)) v.forEach((x, i) => next.push({ value: x, path: joinPath(c.path, i) }));
+            else if (v && typeof v === "object") Object.keys(v).forEach((k) => next.push({ value: v[k], path: joinPath(c.path, k) }));
+          }
+        } else if (t.kind === "rdesc") {
+          // collect this and all descendants; if t.name, keep only those whose last segment matches
+          const visit = (val, path) => {
+            if (t.wildcard) {
+              if (path !== current[0].path) next.push({ value: val, path });
+            }
+            if (Array.isArray(val)) val.forEach((x, i) => {
+              const np = joinPath(path, i);
+              if (t.name === undefined) { /* wildcard handled above */ } 
+              visit(x, np);
+            });
+            else if (val && typeof val === "object") Object.keys(val).forEach((k) => {
+              const np = joinPath(path, k);
+              if (t.name !== undefined && k === t.name) next.push({ value: val[k], path: np });
+              visit(val[k], np);
+            });
+          };
+          for (const c of current) visit(c.value, c.path);
+        } else if (t.kind === "index") {
+          for (const c of current) {
+            const v = c.value;
+            if (Array.isArray(v)) {
+              const idx = t.value < 0 ? v.length + t.value : t.value;
+              if (idx >= 0 && idx < v.length) next.push({ value: v[idx], path: joinPath(c.path, idx) });
+            }
+          }
+        } else if (t.kind === "slice") {
+          for (const c of current) {
+            const v = c.value;
+            if (!Array.isArray(v)) continue;
+            const len = v.length;
+            const step = t.step === undefined ? 1 : t.step;
+            if (step === 0) return { error: "slice step cannot be 0" };
+            let start = t.start === undefined ? (step > 0 ? 0 : len - 1) : t.start;
+            let end = t.end === undefined ? (step > 0 ? len : -len - 1) : t.end;
+            if (start < 0) start += len;
+            if (end < 0) end += len;
+            if (step > 0) {
+              for (let k = Math.max(0, start); k < Math.min(len, end); k += step) next.push({ value: v[k], path: joinPath(c.path, k) });
+            } else {
+              for (let k = Math.min(len - 1, start); k > Math.max(-1, end); k += step) next.push({ value: v[k], path: joinPath(c.path, k) });
+            }
+          }
+        } else if (t.kind === "union") {
+          for (const c of current) {
+            const v = c.value;
+            for (const p of t.parts) {
+              if (p.kind === "index" && Array.isArray(v)) {
+                const idx = p.value < 0 ? v.length + p.value : p.value;
+                if (idx >= 0 && idx < v.length) next.push({ value: v[idx], path: joinPath(c.path, idx) });
+              } else if (p.kind === "key" && v && typeof v === "object" && Object.prototype.hasOwnProperty.call(v, p.name)) {
+                next.push({ value: v[p.name], path: joinPath(c.path, p.name) });
+              }
+            }
+          }
+        } else if (t.kind === "filter") {
+          const compiled = compileFilterExpr(t.expr);
+          if (compiled.error) return { error: "filter: " + compiled.error };
+          for (const c of current) {
+            const v = c.value;
+            if (Array.isArray(v)) v.forEach((x, i) => { try { if (compiled.predicate(x)) next.push({ value: x, path: joinPath(c.path, i) }); } catch {} });
+            else if (v && typeof v === "object") Object.keys(v).forEach((k) => { try { if (compiled.predicate(v[k])) next.push({ value: v[k], path: joinPath(c.path, k) }); } catch {} });
+          }
+        }
+        current = next;
+        if (!current.length) break;
+      }
+      return { results: current };
+    }
+
+    ns.evalJsonPath = (val, expr) => evalJsonPath(val, expr);
+
+    // ---------- JSONPath panel wiring ----------
+    const jpBtn = root.querySelector('[data-action="jsonpath"]');
+    const jpPanel = root.querySelector(".jl-jsonpath-panel");
+    const jpForm = root.querySelector(".jl-jp-form");
+    const jpInput = root.querySelector(".jl-jp-input");
+    const jpStatus = root.querySelector(".jl-jp-status");
+    const jpSummary = root.querySelector(".jl-jp-summary");
+    const jpBody = root.querySelector(".jl-jp-body");
+    const jpEmpty = root.querySelector(".jl-jp-empty");
+    const jpCloseBtn = root.querySelector(".jl-jp-close");
+    const jpCopyBtn = root.querySelector(".jl-jp-copy");
+    const jpExamples = root.querySelector(".jl-jp-examples");
+    let jpResults = [];
+
+    function setJsonPathOpen(open) {
+      jpPanel.hidden = !open;
+      root.classList.toggle("jl-jsonpath-open", open);
+      jpBtn.setAttribute("aria-pressed", String(open));
+      if (open) setTimeout(() => jpInput.focus(), 60);
+    }
+    jpBtn.addEventListener("click", () => setJsonPathOpen(jpPanel.hidden));
+    jpCloseBtn.addEventListener("click", () => setJsonPathOpen(false));
+
+    function renderJsonPathResults(results) {
+      jpBody.innerHTML = "";
+      jpEmpty.hidden = results.length > 0;
+      if (!results.length) return;
+      const frag = document.createDocumentFragment();
+      const max = 500;
+      const slice = results.slice(0, max);
+      slice.forEach((r) => {
+        const card = document.createElement("div");
+        card.className = "jl-jp-card";
+        card.setAttribute("role", "listitem");
+        const head = document.createElement("div");
+        head.className = "jl-jp-card-head";
+        const pathBtn = document.createElement("button");
+        pathBtn.type = "button";
+        pathBtn.className = "jl-jp-card-path";
+        pathBtn.title = "Jump to " + r.path;
+        pathBtn.setAttribute("data-path", r.path);
+        pathBtn.textContent = r.path;
+        const kind = typeOf(r.value);
+        const badge = document.createElement("span");
+        badge.className = "jl-badge jl-badge-kind";
+        badge.setAttribute("data-kind", kind);
+        badge.textContent = kind;
+        head.appendChild(pathBtn);
+        head.appendChild(badge);
+        const body = document.createElement("pre");
+        body.className = "jl-jp-card-body";
+        let txt;
+        try { txt = JSON.stringify(r.value, null, 2); } catch { txt = String(r.value); }
+        if (txt && txt.length > 600) txt = txt.slice(0, 600) + "\u2026";
+        body.textContent = txt;
+        card.appendChild(head);
+        card.appendChild(body);
+        frag.appendChild(card);
+      });
+      jpBody.appendChild(frag);
+      if (results.length > max) {
+        const more = document.createElement("div");
+        more.className = "jl-jp-more";
+        more.textContent = `+${results.length - max} more match${results.length - max === 1 ? "" : "es"} not shown`;
+        jpBody.appendChild(more);
+      }
+    }
+
+    function runJsonPath() {
+      jpStatus.textContent = "";
+      jpPanel.classList.remove("jl-jp-error");
+      const expr = jpInput.value.trim();
+      if (!expr) { jpResults = []; renderJsonPathResults([]); jpSummary.textContent = ""; return; }
+      const out = evalJsonPath(parsed, expr);
+      if (out.error) {
+        jpPanel.classList.add("jl-jp-error");
+        jpStatus.textContent = out.error;
+        jpResults = [];
+        renderJsonPathResults([]);
+        jpSummary.textContent = "";
+        return;
+      }
+      jpResults = out.results;
+      renderJsonPathResults(jpResults);
+      jpSummary.textContent = jpResults.length === 0
+        ? "no matches"
+        : `${jpResults.length} match${jpResults.length === 1 ? "" : "es"}`;
+    }
+
+    jpForm.addEventListener("submit", (ev) => { ev.preventDefault(); runJsonPath(); });
+    let jpInputTimer = 0;
+    jpInput.addEventListener("input", () => {
+      clearTimeout(jpInputTimer);
+      jpInputTimer = setTimeout(runJsonPath, 180);
+    });
+    jpInput.addEventListener("keydown", (ev) => {
+      if (ev.key === "Escape") { ev.preventDefault(); setJsonPathOpen(false); }
+    });
+    jpExamples.addEventListener("click", (ev) => {
+      const chip = ev.target instanceof Element ? ev.target.closest(".jl-jp-chip") : null;
+      if (!chip) return;
+      jpInput.value = chip.getAttribute("data-jp") || "";
+      runJsonPath();
+      jpInput.focus();
+    });
+    jpBody.addEventListener("click", (ev) => {
+      const btn = ev.target instanceof Element ? ev.target.closest(".jl-jp-card-path") : null;
+      if (!btn) return;
+      const path = btn.getAttribute("data-path") || "$";
+      const node = tree.querySelector(`.jl-node[data-path="${cssEscape(path)}"]`);
+      if (!node) { flash(root, "Path not in tree"); return; }
+      expandAncestorsOf(node, tree);
+      if (node.classList.contains("jl-collapsed")) setCollapsed(node, false);
+      node.scrollIntoView({ block: "center", behavior: "smooth" });
+      const row = node.querySelector(":scope > .jl-row");
+      if (row) { row.classList.add("jl-row-ping"); setTimeout(() => row.classList.remove("jl-row-ping"), 700); }
+    });
+    jpCopyBtn.addEventListener("click", async () => {
+      if (!jpResults.length) { flash(root, "No matches"); return; }
+      try {
+        const payload = jpResults.length === 1 ? jpResults[0].value : jpResults.map((r) => r.value);
+        await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
+        flash(root, jpResults.length === 1 ? "Match copied" : "Matches copied");
+      } catch { flash(root, "Copy failed"); }
+    });
+
     // ---------- path breadcrumb on hover ----------
     // Floats at the bottom of the viewer when hovering (or keyboard-focusing)
     // any tree row. Each segment is clickable to jump+expand to that ancestor.
@@ -2452,6 +2946,7 @@
         { id: "download", label: "Download JSON", hint: "File", icon: ICONS.download, run: () => root.querySelector('[data-action="download"]').click() },
         { id: "schema", label: "Toggle inferred schema panel", hint: "Panel", icon: ICONS.schema, run: () => root.querySelector('[data-action="schema"]').click() },
         { id: "diff", label: "Toggle diff against another URL", hint: "Panel", icon: ICONS.diff, run: () => root.querySelector('[data-action="diff"]').click() },
+        { id: "jsonpath", label: "Toggle JSONPath evaluator panel", hint: "Panel", icon: ICONS.jsonpath, run: () => root.querySelector('[data-action="jsonpath"]').click() },
         { id: "bookmarks", label: "Toggle bookmarks panel", hint: "B", icon: ICONS.bookmark, run: () => root.querySelector('[data-action="bookmarks"]').click() },
         { id: "bookmark-add", label: "Bookmark this URL", hint: "Save", icon: ICONS.plus, run: () => { setBookmarksOpen(true); addCurrentAsBookmark(); } },
         { id: "raw", label: inRaw ? "Show interactive tree" : "Show raw JSON text", hint: "View", icon: ICONS.raw, run: () => root.querySelector('[data-action="raw"]').click() },

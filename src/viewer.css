@@ -1744,3 +1744,223 @@ mark.jl-hit.jl-hit-active {
 :root[data-jl-theme="light"] .jl-bm-search-input,
 :root[data-jl-theme="light"] .jl-bm-edit-field input { background: rgba(15, 18, 25, 0.03); }
 :root[data-jl-theme="light"] .jl-bm-empty-hint code { background: rgba(15, 18, 25, 0.06); }
+
+/* ---------- JSONPath panel ---------- */
+.jl-jsonpath-panel {
+  position: fixed;
+  top: 12px;
+  right: 16px;
+  bottom: 12px;
+  width: 460px;
+  max-width: calc(100vw - 32px);
+  z-index: 22;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-strong);
+  border: 1px solid var(--border-strong);
+  border-radius: 16px;
+  backdrop-filter: blur(24px) saturate(140%);
+  -webkit-backdrop-filter: blur(24px) saturate(140%);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+  animation: jl-schema-in 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+#json-lens-root.jl-jsonpath-open .jl-viewport > .jl-tree-host {
+  padding-right: 492px;
+}
+@media (max-width: 880px) {
+  #json-lens-root.jl-jsonpath-open .jl-viewport > .jl-tree-host { padding-right: 0; }
+  .jl-jsonpath-panel { left: 16px; width: auto; }
+}
+.jl-jp-header {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.04), transparent),
+    var(--surface);
+}
+.jl-jp-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+.jl-jp-title-icon svg { width: 16px; height: 16px; color: var(--accent); }
+.jl-jp-summary { font-size: 12px; color: var(--muted); letter-spacing: -0.01em; }
+.jl-jp-tools { display: inline-flex; gap: 6px; align-items: center; }
+.jl-jp-form {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px 8px;
+}
+.jl-jp-prefix svg { width: 16px; height: 16px; color: var(--muted); }
+.jl-jp-input {
+  width: 100%;
+  font: inherit;
+  font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  letter-spacing: -0.01em;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 9px 12px;
+  border-radius: 10px;
+  outline: none;
+  transition: border-color 160ms, box-shadow 160ms;
+}
+.jl-jp-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.jl-jp-run { white-space: nowrap; }
+.jl-jp-status {
+  padding: 0 14px 6px;
+  font-size: 12px;
+  color: var(--muted);
+  min-height: 0;
+}
+#json-lens-root .jl-jsonpath-panel.jl-jp-error .jl-jp-input {
+  border-color: color-mix(in srgb, #ef4444 60%, var(--border));
+  box-shadow: 0 0 0 2px color-mix(in srgb, #ef4444 30%, transparent);
+}
+#json-lens-root .jl-jsonpath-panel.jl-jp-error .jl-jp-status { color: #f87171; }
+.jl-jp-examples {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 0 14px 10px;
+}
+.jl-jp-examples-label {
+  font-size: 11px;
+  color: var(--muted);
+  margin-right: 2px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.jl-jp-chip {
+  font: inherit;
+  font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  font-size: 11.5px;
+  color: var(--text);
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 9px;
+  cursor: pointer;
+  transition: background 160ms cubic-bezier(0.16, 1, 0.3, 1), border-color 160ms;
+}
+.jl-jp-chip:hover { background: rgba(255,255,255,0.08); border-color: var(--border-strong); }
+.jl-jp-chip:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 50%, transparent);
+}
+.jl-jp-body {
+  flex: 1;
+  overflow: auto;
+  padding: 4px 14px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.jl-jp-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(255,255,255,0.02);
+  overflow: hidden;
+  transition: border-color 180ms, background 180ms;
+}
+.jl-jp-card:hover { border-color: var(--border-strong); background: rgba(255,255,255,0.04); }
+.jl-jp-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(255,255,255,0.03), transparent);
+}
+.jl-jp-card-path {
+  flex: 1;
+  text-align: left;
+  font: inherit;
+  font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  font-size: 11.5px;
+  color: var(--accent);
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.jl-jp-card-path:hover { text-decoration: underline; }
+.jl-jp-card-path:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+.jl-jp-card-body {
+  margin: 0;
+  padding: 10px 12px;
+  font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 220px;
+  overflow: auto;
+}
+.jl-jp-more {
+  font-size: 11.5px;
+  color: var(--muted);
+  text-align: center;
+  padding: 8px 0 4px;
+  letter-spacing: -0.01em;
+}
+.jl-jp-empty {
+  margin: 8px 14px 14px;
+  padding: 22px 18px 24px;
+  border: 1px dashed var(--border);
+  border-radius: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 6px;
+  color: var(--muted);
+  background: rgba(255,255,255,0.015);
+}
+.jl-jp-empty-art { width: 120px; height: 80px; color: var(--accent); opacity: 0.7; margin-bottom: 6px; }
+.jl-jp-empty-title { font-size: 13px; color: var(--text); font-weight: 600; letter-spacing: -0.01em; }
+.jl-jp-empty-hint { font-size: 12px; line-height: 1.5; max-width: 360px; }
+.jl-jp-empty-hint code {
+  font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  font-size: 11.5px;
+  background: rgba(255,255,255,0.06);
+  padding: 1px 5px;
+  border-radius: 4px;
+  color: var(--text);
+}
+
+:root[data-jl-theme="light"] .jl-jsonpath-panel {
+  background: rgba(255,255,255,0.85);
+  box-shadow: 0 20px 60px rgba(15, 18, 25, 0.18);
+}
+:root[data-jl-theme="light"] .jl-jp-input,
+:root[data-jl-theme="light"] .jl-jp-chip { background: rgba(15, 18, 25, 0.03); }
+:root[data-jl-theme="light"] .jl-jp-chip:hover { background: rgba(15, 18, 25, 0.07); }
+:root[data-jl-theme="light"] .jl-jp-card { background: rgba(15, 18, 25, 0.02); }
+:root[data-jl-theme="light"] .jl-jp-card:hover { background: rgba(15, 18, 25, 0.04); }
+:root[data-jl-theme="light"] .jl-jp-empty-hint code { background: rgba(15, 18, 25, 0.06); }
