@@ -580,6 +580,9 @@
     history: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 7v5l3.5 2"/></svg>`,
     diffArrow: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/></svg>`,
     csv: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M3.5 9.5h17"/><path d="M3.5 14.5h17"/><path d="M9 9.5v10"/><path d="M15 9.5v10"/></svg>`,
+    pin: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3l7 7-3 1-4 4 1 4-3-1-5 5-1-4-4-1 5-5-1-3 4-4z"/></svg>`,
+    pinFilled: `<svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"><path d="M14 3l7 7-3 1-4 4 1 4-3-1-5 5-1-4-4-1 5-5-1-3 4-4z"/></svg>`,
+    grip: `<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><circle cx="9" cy="6" r="1.4"/><circle cx="15" cy="6" r="1.4"/><circle cx="9" cy="12" r="1.4"/><circle cx="15" cy="12" r="1.4"/><circle cx="9" cy="18" r="1.4"/><circle cx="15" cy="18" r="1.4"/></svg>`,
   };
 
   // ---------- history (snapshots per URL) ----------
@@ -1311,6 +1314,7 @@
     const row = document.createElement("div");
     row.className = "jl-row";
     row.setAttribute("role", "treeitem");
+    if (pathStr) row.setAttribute("draggable", "true");
 
     // toggle (chevron) or spacer
     if (isContainer) {
@@ -1380,6 +1384,18 @@
     // and the copy-as-curl-PATCH action in the chrome.
     const actions = document.createElement("span");
     actions.className = "jl-row-actions";
+    // Pin (applies to every addressable node, container or primitive).
+    if (pathStr) {
+      const pinBtn = document.createElement("button");
+      pinBtn.type = "button";
+      pinBtn.className = "jl-row-action jl-row-action-pin";
+      pinBtn.setAttribute("data-action", "toggle-pin");
+      pinBtn.setAttribute("title", "Pin node");
+      pinBtn.setAttribute("aria-label", "Pin node");
+      pinBtn.setAttribute("draggable", "true");
+      pinBtn.innerHTML = `${ICONS.pin}<span class="jl-row-action-label">Pin</span>`;
+      actions.appendChild(pinBtn);
+    }
     if (isContainer) {
       const tsBtn = document.createElement("button");
       tsBtn.type = "button";
@@ -1868,6 +1884,7 @@
             <button class="jl-btn jl-btn-ghost" data-action="diff" title="Diff against another JSON URL" aria-label="Diff against another JSON URL" aria-pressed="false">${ICONS.diff}<span>Diff</span></button>
             <button class="jl-btn jl-btn-ghost" data-action="jsonpath" title="JSONPath evaluator" aria-label="JSONPath evaluator" aria-pressed="false">${ICONS.jsonpath}<span>JSONPath</span></button>
             <button class="jl-btn jl-btn-ghost" data-action="bookmarks" title="Bookmarks (B)" aria-label="Bookmarks" aria-pressed="false">${ICONS.bookmark}<span>Bookmarks</span></button>
+            <button class="jl-btn jl-btn-ghost" data-action="pins" title="Pinned nodes (P) — drag any row here to pin" aria-label="Pinned nodes" aria-pressed="false">${ICONS.pin}<span>Pins</span><span class="jl-pin-count" aria-hidden="true"></span></button>
             <button class="jl-btn jl-btn-ghost" data-action="history" title="History (H)" aria-label="History timeline" aria-pressed="false">${ICONS.history}<span>History</span><span class="jl-hist-count" aria-hidden="true"></span></button>
             <button class="jl-btn jl-btn-ghost" data-action="palette" title="Command palette (⌘⇧P)" aria-label="Command palette">${ICONS.command}<span>Actions</span></button>
             <button class="jl-btn jl-btn-ghost" data-action="raw" title="Toggle raw view" aria-label="Toggle raw view">${ICONS.raw}<span>Raw</span></button>
@@ -2048,6 +2065,36 @@
               <button type="submit" class="jl-btn jl-bm-edit-save">Save</button>
             </div>
           </form>
+        </aside>
+        <aside class="jl-pins-panel" hidden aria-label="Pinned JSON nodes">
+          <div class="jl-pins-header">
+            <div class="jl-pins-title">
+              <span class="jl-pins-title-icon" aria-hidden="true">${ICONS.pin}</span>
+              <span>Pinned nodes</span>
+            </div>
+            <div class="jl-pins-summary" aria-live="polite"></div>
+            <div class="jl-pins-tools">
+              <button class="jl-btn jl-btn-ghost jl-pins-copy" type="button" title="Copy pinned values as JSON" aria-label="Copy pinned values as JSON">${ICONS.copy}<span>Copy</span></button>
+              <button class="jl-btn jl-btn-ghost jl-pins-clear" type="button" title="Unpin all" aria-label="Unpin all">${ICONS.trash}<span>Clear</span></button>
+              <button class="jl-btn jl-btn-ghost jl-pins-close" type="button" title="Close pins" aria-label="Close pinned nodes">${ICONS.close}</button>
+            </div>
+          </div>
+          <div class="jl-pins-dropzone" aria-label="Drop tree rows here to pin">
+            <span class="jl-pins-dropzone-icon" aria-hidden="true">${ICONS.pin}</span>
+            <span class="jl-pins-dropzone-text">Drop any row here — or click <span class="jl-pins-pinkey">pin</span> on a row</span>
+          </div>
+          <div class="jl-pins-body" role="list"></div>
+          <div class="jl-pins-empty" hidden>
+            <svg class="jl-pins-empty-art" viewBox="0 0 160 110" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M22 30c8-12 24-18 40-16" opacity="0.4"/>
+              <path d="M86 16l28 28-10 4-14 14 4 14-10-4-22 22-4-14-14-4 22-22-4-10 14-14z"/>
+              <circle cx="36" cy="82" r="2" opacity="0.5"/>
+              <circle cx="128" cy="24" r="2.5" opacity="0.5"/>
+              <path d="M122 70l3 6 6 1-4.5 4.5 1 6.5-5.5-3-5.5 3 1-6.5L113 77l6-1z" opacity="0.65"/>
+            </svg>
+            <div class="jl-pins-empty-title">Nothing pinned yet</div>
+            <div class="jl-pins-empty-hint">Drag any tree row into this panel for quick cross-reference, or hit <code>p</code> with a row focused.</div>
+          </div>
         </aside>
         <aside class="jl-history-panel" hidden aria-label="JSON snapshot history for this URL">
           <div class="jl-hist-header">
@@ -2309,6 +2356,8 @@
           startEdit(node, pathStr);
         } else if (action === "revert-value") {
           revertEdit(node, pathStr);
+        } else if (action === "toggle-pin") {
+          togglePin(pathStr);
         }
         return;
       }
@@ -4032,6 +4081,9 @@
         { id: "jsonpath", label: "Toggle JSONPath evaluator panel", hint: "Panel", icon: ICONS.jsonpath, run: () => root.querySelector('[data-action="jsonpath"]').click() },
         { id: "bookmarks", label: "Toggle bookmarks panel", hint: "B", icon: ICONS.bookmark, run: () => root.querySelector('[data-action="bookmarks"]').click() },
         { id: "bookmark-add", label: "Bookmark this URL", hint: "Save", icon: ICONS.plus, run: () => { setBookmarksOpen(true); addCurrentAsBookmark(); } },
+        { id: "pins", label: "Toggle pinned nodes panel", hint: "P", icon: ICONS.pin, run: () => setPinsOpen(pinsPanel.hidden) },
+        { id: "pins-clear", label: "Unpin all nodes", hint: "Pins", icon: ICONS.trash, run: () => { if (pinsList.length) { pinsList = []; refreshPinUI(); persistPins(); flash(root, "All pins cleared"); } } },
+        { id: "pins-copy", label: "Copy pinned values as JSON", hint: "Clipboard", icon: ICONS.copy, run: () => pinsCopy.click() },
         { id: "history", label: "Toggle history timeline", hint: "H", icon: ICONS.history, run: () => root.querySelector('[data-action="history"]').click() },
         { id: "history-clear", label: "Clear history for this URL", hint: "History", icon: ICONS.trash, run: () => { setHistoryOpen(true); clearHistoryForCurrent(); } },
         { id: "raw", label: inRaw ? "Show interactive tree" : "Show raw JSON text", hint: "View", icon: ICONS.raw, run: () => root.querySelector('[data-action="raw"]').click() },
@@ -4168,6 +4220,374 @@
         setPaletteOpen(false);
       }
     });
+
+    // ---------- pinned nodes sidebar ----------
+    // Pins live in-memory for this session and are persisted per URL via
+    // chrome.storage.local for stable cross-reference across reloads. Each pin
+    // is `{ path, ts }`; the value preview is resolved live from `parsed` so
+    // edits flow through automatically.
+    const PINS_KEY = "json-lens:pins";
+    const PINS_MAX = 64;
+    const pinsPanel = root.querySelector(".jl-pins-panel");
+    const pinsBtn = root.querySelector('[data-action="pins"]');
+    const pinsBody = root.querySelector(".jl-pins-body");
+    const pinsEmpty = root.querySelector(".jl-pins-empty");
+    const pinsSummary = root.querySelector(".jl-pins-summary");
+    const pinsClose = root.querySelector(".jl-pins-close");
+    const pinsClear = root.querySelector(".jl-pins-clear");
+    const pinsCopy = root.querySelector(".jl-pins-copy");
+    const pinsDropzone = root.querySelector(".jl-pins-dropzone");
+    const pinsCount = root.querySelector(".jl-pin-count");
+    /** @type {{ path: string, ts: number }[]} */
+    let pinsList = [];
+
+    function pinsStorage() {
+      try { return chrome && chrome.storage && chrome.storage.local ? chrome.storage.local : null; }
+      catch { return null; }
+    }
+    function loadPinsAll() {
+      return new Promise((resolve) => {
+        const s = pinsStorage();
+        if (!s) { resolve({}); return; }
+        try {
+          s.get(PINS_KEY, (obj) => {
+            if (chrome.runtime && chrome.runtime.lastError) { resolve({}); return; }
+            const v = obj && obj[PINS_KEY];
+            resolve(v && typeof v === "object" ? v : {});
+          });
+        } catch { resolve({}); }
+      });
+    }
+    function savePinsAll(map) {
+      return new Promise((resolve) => {
+        const s = pinsStorage();
+        if (!s) { resolve(false); return; }
+        try { s.set({ [PINS_KEY]: map }, () => resolve(!(chrome.runtime && chrome.runtime.lastError))); }
+        catch { resolve(false); }
+      });
+    }
+    async function loadPinsForCurrent() {
+      const map = await loadPinsAll();
+      const list = Array.isArray(map[location.href]) ? map[location.href] : [];
+      pinsList = list
+        .filter((p) => p && typeof p.path === "string")
+        .map((p) => ({ path: p.path, ts: Number(p.ts) || Date.now() }))
+        .slice(0, PINS_MAX);
+      refreshPinUI();
+    }
+    async function persistPins() {
+      const map = await loadPinsAll();
+      if (pinsList.length) map[location.href] = pinsList; else delete map[location.href];
+      // Cap stored URLs to avoid unbounded growth.
+      const keys = Object.keys(map);
+      if (keys.length > 200) {
+        // drop oldest by latest pin ts
+        keys.map((k) => ({ k, t: Math.max(...(map[k].map((p) => p.ts || 0))) || 0 }))
+          .sort((a, b) => a.t - b.t)
+          .slice(0, keys.length - 200)
+          .forEach(({ k }) => { delete map[k]; });
+      }
+      await savePinsAll(map);
+    }
+
+    function isPinned(pathStr) { return pinsList.some((p) => p.path === pathStr); }
+
+    function refreshPinIcon(pathStr) {
+      const node = tree.querySelector(`.jl-node[data-path="${cssEscape(pathStr)}"]`);
+      if (!node) return;
+      const btn = node.querySelector(':scope > .jl-row > .jl-row-actions > .jl-row-action-pin');
+      if (!btn) return;
+      const on = isPinned(pathStr);
+      btn.innerHTML = `${on ? ICONS.pinFilled : ICONS.pin}<span class="jl-row-action-label">${on ? "Pinned" : "Pin"}</span>`;
+      btn.classList.toggle("jl-row-action-pin-on", on);
+      btn.setAttribute("title", on ? "Unpin node" : "Pin node");
+      btn.setAttribute("aria-pressed", String(on));
+      node.classList.toggle("jl-node-pinned", on);
+    }
+    function refreshAllPinIcons() {
+      tree.querySelectorAll(".jl-node-pinned").forEach((n) => n.classList.remove("jl-node-pinned"));
+      tree.querySelectorAll(".jl-row-action-pin").forEach((btn) => {
+        const node = btn.closest(".jl-node");
+        if (!node) return;
+        const p = node.getAttribute("data-path") || "";
+        const on = isPinned(p);
+        if (on) node.classList.add("jl-node-pinned");
+        btn.innerHTML = `${on ? ICONS.pinFilled : ICONS.pin}<span class="jl-row-action-label">${on ? "Pinned" : "Pin"}</span>`;
+        btn.classList.toggle("jl-row-action-pin-on", on);
+        btn.setAttribute("title", on ? "Unpin node" : "Pin node");
+        btn.setAttribute("aria-pressed", String(on));
+      });
+    }
+
+    function refreshPinUI() {
+      if (pinsCount) {
+        if (pinsList.length) { pinsCount.hidden = false; pinsCount.textContent = String(pinsList.length); }
+        else { pinsCount.hidden = true; pinsCount.textContent = ""; }
+      }
+      refreshAllPinIcons();
+      if (!pinsPanel.hidden) renderPins();
+    }
+
+    function shortPreview(value, max) {
+      max = max || 64;
+      const t = typeOf(value);
+      if (t === "array") { const n = value.length; return `[${n} ${n === 1 ? "item" : "items"}]`; }
+      if (t === "object") { const n = Object.keys(value).length; return `{${n} ${n === 1 ? "key" : "keys"}}`; }
+      if (t === "string") {
+        const s = JSON.stringify(value);
+        return s.length > max ? s.slice(0, max - 1) + "\u2026\"" : s;
+      }
+      if (t === "null") return "null";
+      const s = String(value);
+      return s.length > max ? s.slice(0, max - 1) + "\u2026" : s;
+    }
+
+    function renderPins() {
+      if (!pinsList.length) {
+        pinsEmpty.hidden = false;
+        pinsBody.innerHTML = "";
+        pinsSummary.textContent = "";
+        pinsClear.disabled = true;
+        pinsCopy.disabled = true;
+        return;
+      }
+      pinsEmpty.hidden = true;
+      pinsClear.disabled = false;
+      pinsCopy.disabled = false;
+      pinsSummary.textContent = `${pinsList.length} pinned`;
+      const frag = document.createDocumentFragment();
+      pinsList.forEach((p, i) => {
+        const resolved = resolvePath(parsed, p.path);
+        const ok = resolved.ok;
+        const t = ok ? typeOf(resolved.value) : "missing";
+        const card = document.createElement("div");
+        card.className = "jl-pins-card";
+        card.setAttribute("role", "listitem");
+        card.setAttribute("draggable", "true");
+        card.dataset.path = p.path;
+        card.dataset.index = String(i);
+        card.innerHTML = `
+          <span class="jl-pins-card-grip" aria-hidden="true" title="Drag to reorder">${ICONS.grip}</span>
+          <button type="button" class="jl-pins-card-main" data-act="jump" title="Jump to ${escapeHTML(p.path)}">
+            <div class="jl-pins-card-head">
+              <span class="jl-pins-card-type" data-type="${escapeHTML(t)}">${escapeHTML(t)}</span>
+              <code class="jl-pins-card-path">${escapeHTML(p.path)}</code>
+            </div>
+            <div class="jl-pins-card-preview">${ok ? escapeHTML(shortPreview(resolved.value)) : '<span class="jl-pins-card-missing">no longer in document</span>'}</div>
+          </button>
+          <div class="jl-pins-card-actions">
+            <button type="button" class="jl-icon-btn" data-act="copy" title="Copy value as JSON" aria-label="Copy value as JSON" ${ok ? "" : "disabled aria-disabled=\"true\""}>${ICONS.copy}</button>
+            <button type="button" class="jl-icon-btn" data-act="unpin" title="Unpin" aria-label="Unpin">${ICONS.close}</button>
+          </div>`;
+        frag.appendChild(card);
+      });
+      pinsBody.innerHTML = "";
+      pinsBody.appendChild(frag);
+    }
+
+    function setPinsOpen(open) {
+      pinsPanel.hidden = !open;
+      root.classList.toggle("jl-pins-open", open);
+      pinsBtn.setAttribute("aria-pressed", String(open));
+      if (open) renderPins();
+    }
+
+    function togglePin(pathStr) {
+      if (!pathStr) return;
+      const idx = pinsList.findIndex((p) => p.path === pathStr);
+      if (idx >= 0) {
+        pinsList.splice(idx, 1);
+        flash(root, "Unpinned " + pathStr);
+      } else {
+        if (pinsList.length >= PINS_MAX) { flash(root, `Pin limit reached (${PINS_MAX})`); return; }
+        pinsList.unshift({ path: pathStr, ts: Date.now() });
+        flash(root, "Pinned " + pathStr);
+      }
+      refreshPinUI();
+      persistPins();
+    }
+
+    function jumpToPath(pathStr) {
+      const node = tree.querySelector(`.jl-node[data-path="${cssEscape(pathStr)}"]`);
+      if (!node) { flash(root, "Path not in tree"); return; }
+      expandAncestorsOf(node, tree);
+      if (node.classList.contains("jl-collapsed")) setCollapsed(node, false);
+      node.scrollIntoView({ block: "center", behavior: "smooth" });
+      const row = node.querySelector(":scope > .jl-row");
+      if (row) { row.classList.add("jl-row-ping"); setTimeout(() => row.classList.remove("jl-row-ping"), 700); }
+    }
+
+    pinsBtn.addEventListener("click", () => setPinsOpen(pinsPanel.hidden));
+    pinsClose.addEventListener("click", () => setPinsOpen(false));
+    pinsClear.addEventListener("click", () => {
+      if (!pinsList.length) return;
+      pinsList = [];
+      refreshPinUI();
+      persistPins();
+      flash(root, "All pins cleared");
+    });
+    pinsCopy.addEventListener("click", async () => {
+      if (!pinsList.length) { flash(root, "No pins"); return; }
+      const payload = pinsList.map((p) => {
+        const r = resolvePath(parsed, p.path);
+        return { path: p.path, value: r.ok ? r.value : null, missing: !r.ok };
+      });
+      try { await navigator.clipboard.writeText(JSON.stringify(payload, null, 2)); flash(root, "Pins copied"); }
+      catch { flash(root, "Copy failed"); }
+    });
+    pinsBody.addEventListener("click", (ev) => {
+      const btn = ev.target instanceof Element ? ev.target.closest("button[data-act]") : null;
+      if (!btn) return;
+      const card = btn.closest(".jl-pins-card");
+      if (!card) return;
+      const path = card.dataset.path;
+      const act = btn.dataset.act;
+      if (act === "jump") {
+        jumpToPath(path);
+      } else if (act === "unpin") {
+        togglePin(path);
+      } else if (act === "copy") {
+        const r = resolvePath(parsed, path);
+        if (!r.ok) { flash(root, "Value missing"); return; }
+        try { navigator.clipboard.writeText(JSON.stringify(r.value, null, 2)); flash(root, "Value copied"); }
+        catch { flash(root, "Copy failed"); }
+      }
+    });
+
+    // Drag & drop. Tree rows + their pin buttons start a drag carrying the
+    // node's path; the panel + its dropzone accept it. Inside the panel we
+    // also allow reordering by dragging cards.
+    const DRAG_MIME = "application/x-json-lens-path";
+    function dragSetPath(ev, path) {
+      try {
+        ev.dataTransfer.setData(DRAG_MIME, path);
+        ev.dataTransfer.setData("text/plain", path);
+        ev.dataTransfer.effectAllowed = "copyMove";
+      } catch {}
+    }
+    function dragGetPath(ev) {
+      try {
+        const v = ev.dataTransfer.getData(DRAG_MIME) || ev.dataTransfer.getData("text/plain");
+        return (typeof v === "string" && v.startsWith("$")) ? v : "";
+      } catch { return ""; }
+    }
+    tree.addEventListener("dragstart", (ev) => {
+      const t = ev.target instanceof Element ? ev.target : null;
+      if (!t) return;
+      // Either a row itself or its pin button starts the drag.
+      let path = "";
+      const node = t.closest(".jl-node");
+      if (node) path = node.getAttribute("data-path") || "";
+      if (!path || path === "$" || path === "") {
+        // Allow root pin via the pin button explicitly.
+        if (t.closest(".jl-row-action-pin")) path = node ? node.getAttribute("data-path") || "" : "";
+      }
+      if (!path) return;
+      dragSetPath(ev, path);
+      root.classList.add("jl-dragging-pin");
+    });
+    tree.addEventListener("dragend", () => { root.classList.remove("jl-dragging-pin"); });
+
+    function panelDragOver(ev) {
+      if (!ev.dataTransfer) return;
+      const types = ev.dataTransfer.types;
+      const hasPath = types && (Array.prototype.indexOf.call(types, DRAG_MIME) >= 0 || Array.prototype.indexOf.call(types, "text/plain") >= 0);
+      if (!hasPath) return;
+      ev.preventDefault();
+      ev.dataTransfer.dropEffect = "copy";
+      pinsDropzone.classList.add("jl-pins-dropzone-hot");
+      pinsPanel.classList.add("jl-pins-panel-hot");
+    }
+    function panelDragLeave() {
+      pinsDropzone.classList.remove("jl-pins-dropzone-hot");
+      pinsPanel.classList.remove("jl-pins-panel-hot");
+    }
+    function panelDrop(ev) {
+      const path = dragGetPath(ev);
+      panelDragLeave();
+      if (!path) return;
+      ev.preventDefault();
+      if (!isPinned(path)) {
+        if (pinsList.length >= PINS_MAX) { flash(root, `Pin limit reached (${PINS_MAX})`); return; }
+        pinsList.unshift({ path, ts: Date.now() });
+        refreshPinUI();
+        persistPins();
+        flash(root, "Pinned " + path);
+      } else {
+        flash(root, "Already pinned");
+      }
+    }
+    pinsPanel.addEventListener("dragover", panelDragOver);
+    pinsPanel.addEventListener("dragleave", panelDragLeave);
+    pinsPanel.addEventListener("drop", panelDrop);
+    pinsDropzone.addEventListener("dragover", panelDragOver);
+    pinsDropzone.addEventListener("drop", panelDrop);
+
+    // Reorder pins by dragging cards within the body.
+    let dragReorderFrom = -1;
+    pinsBody.addEventListener("dragstart", (ev) => {
+      const card = ev.target instanceof Element ? ev.target.closest(".jl-pins-card") : null;
+      if (!card) return;
+      dragReorderFrom = Number(card.dataset.index);
+      try {
+        ev.dataTransfer.setData(DRAG_MIME, card.dataset.path || "");
+        ev.dataTransfer.setData("text/plain", card.dataset.path || "");
+        ev.dataTransfer.effectAllowed = "move";
+      } catch {}
+      card.classList.add("jl-pins-card-dragging");
+    });
+    pinsBody.addEventListener("dragend", (ev) => {
+      const card = ev.target instanceof Element ? ev.target.closest(".jl-pins-card") : null;
+      if (card) card.classList.remove("jl-pins-card-dragging");
+      dragReorderFrom = -1;
+    });
+    pinsBody.addEventListener("dragover", (ev) => {
+      if (dragReorderFrom < 0) return;
+      ev.preventDefault();
+      ev.dataTransfer.dropEffect = "move";
+    });
+    pinsBody.addEventListener("drop", (ev) => {
+      if (dragReorderFrom < 0) return;
+      const card = ev.target instanceof Element ? ev.target.closest(".jl-pins-card") : null;
+      const toIdx = card ? Number(card.dataset.index) : pinsList.length - 1;
+      if (Number.isNaN(toIdx) || toIdx === dragReorderFrom) { dragReorderFrom = -1; return; }
+      const [moved] = pinsList.splice(dragReorderFrom, 1);
+      pinsList.splice(Math.max(0, Math.min(pinsList.length, toIdx)), 0, moved);
+      dragReorderFrom = -1;
+      refreshPinUI();
+      persistPins();
+    });
+
+    // Keyboard: 'p' toggles pin on focused tree node when not typing; 'P'
+    // toggles the panel (cap to avoid clobbering 'p' on focused row).
+    document.addEventListener("keydown", (ev) => {
+      if (ev.key !== "p" && ev.key !== "P") return;
+      if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
+      const t = ev.target;
+      const tag = t && t.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || (t && t.isContentEditable)) return;
+      ev.preventDefault();
+      if (ev.key === "P") { setPinsOpen(pinsPanel.hidden); return; }
+      const focused = tree.querySelector(".jl-focused");
+      if (focused) {
+        const p = focused.getAttribute("data-path") || "";
+        if (p) togglePin(p);
+      } else {
+        setPinsOpen(pinsPanel.hidden);
+      }
+    });
+
+    // Sync pins across tabs that share the same URL.
+    try {
+      if (chrome && chrome.storage && chrome.storage.onChanged) {
+        chrome.storage.onChanged.addListener((changes, area) => {
+          if (area !== "local" || !changes[PINS_KEY]) return;
+          loadPinsForCurrent();
+        });
+      }
+    } catch {}
+
+    loadPinsForCurrent();
 
     root.querySelector('[data-action="raw"]').addEventListener("click", () => {
       const inRaw = root.classList.toggle("jl-raw-mode");
