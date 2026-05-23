@@ -7,7 +7,7 @@ This file is the agent's task queue. Unchecked items get implemented in order. W
 - [x] Collapsible tree view with type badges
 - [x] Live filter bar (jq-style path filtering)
 - [x] Search keys and values with highlight
-- [ ] Inferred schema panel (types + counts)
+- [x] Inferred schema panel (types + counts)
 - [ ] Copy node as TypeScript interface
 - [ ] Copy node as JSON Schema
 - [ ] Diff two JSON URLs side-by-side

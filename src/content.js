@@ -97,7 +97,186 @@
     arrowDown: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v13"/><path d="M6 12l6 6 6-6"/></svg>`,
     expand: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4H5a1 1 0 0 0-1 1v4"/><path d="M15 4h4a1 1 0 0 1 1 1v4"/><path d="M9 20H5a1 1 0 0 1-1-1v-4"/><path d="M15 20h4a1 1 0 0 0 1-1v-4"/></svg>`,
     collapse: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9h5V4"/><path d="M20 9h-5V4"/><path d="M4 15h5v5"/><path d="M20 15h-5v5"/></svg>`,
+    schema: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4" width="7" height="6" rx="1.5"/><rect x="13.5" y="4" width="7" height="6" rx="1.5"/><rect x="3.5" y="14" width="7" height="6" rx="1.5"/><rect x="13.5" y="14" width="7" height="6" rx="1.5"/></svg>`,
   };
+
+  // ---------- schema inference ----------
+  // Walks the parsed value and produces a tree of nodes keyed by a
+  // canonical "shape path" (arrays collapse to [] so siblings unify).
+  // Each node tracks:
+  //   types: Map<type, count>   distinct JSON types observed
+  //   count: total occurrences across the dataset
+  //   parentSize: total occurrences of the parent container (for coverage %)
+  //   children: ordered Map of objectKey -> node
+  //   items:   single node aggregating all array elements (when applicable)
+  function emptyNode() {
+    return {
+      types: new Map(),
+      count: 0,
+      children: new Map(),
+      items: null,
+      itemsTotal: 0, // total array elements observed across all parent arrays
+    };
+  }
+
+  function inferSchema(root) {
+    const top = emptyNode();
+    visitSchema(root, top);
+    return top;
+  }
+
+  function visitSchema(value, node) {
+    const t = typeOf(value);
+    node.count += 1;
+    node.types.set(t, (node.types.get(t) || 0) + 1);
+    if (t === "object") {
+      const keys = Object.keys(value);
+      for (const k of keys) {
+        let child = node.children.get(k);
+        if (!child) {
+          child = emptyNode();
+          node.children.set(k, child);
+        }
+        visitSchema(value[k], child);
+      }
+    } else if (t === "array") {
+      if (!node.items) node.items = emptyNode();
+      node.itemsTotal += value.length;
+      for (const item of value) visitSchema(item, node.items);
+    }
+  }
+
+  function schemaTypeLabel(node) {
+    // Stable order: object, array, string, number, boolean, null
+    const order = ["object", "array", "string", "number", "boolean", "null"];
+    const present = order.filter((t) => node.types.has(t));
+    return present;
+  }
+
+  function fmtPct(num, denom) {
+    if (!denom) return "";
+    const p = (num / denom) * 100;
+    if (p >= 99.95) return "100%";
+    if (p >= 10) return `${p.toFixed(0)}%`;
+    return `${p.toFixed(1)}%`;
+  }
+
+  function fmtNum(n) {
+    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+    if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+    return String(n);
+  }
+
+  function buildSchemaTree(rootNode) {
+    const wrap = document.createElement("div");
+    wrap.className = "jl-schema-tree";
+    wrap.setAttribute("role", "tree");
+    wrap.appendChild(buildSchemaNode("$", rootNode, 0, true, 0, "root"));
+    return wrap;
+  }
+
+  // parentCount: total occurrences of the parent (denom for coverage).
+  // kind: "root" | "key" (object key) | "items" (array element node).
+  function buildSchemaNode(label, node, depth, isRoot, parentCount, kind) {
+    const el = document.createElement("div");
+    el.className = "jl-schema-node";
+    el.setAttribute("data-depth", String(depth));
+
+    const row = document.createElement("div");
+    row.className = "jl-schema-row";
+
+    const hasChildren = node.children.size > 0 || node.items;
+    if (hasChildren) {
+      const tog = document.createElement("button");
+      tog.className = "jl-schema-toggle";
+      tog.type = "button";
+      tog.setAttribute("aria-expanded", "true");
+      tog.setAttribute("aria-label", "Toggle");
+      tog.innerHTML = ICONS.caret;
+      row.appendChild(tog);
+    } else {
+      const sp = document.createElement("span");
+      sp.className = "jl-schema-toggle jl-schema-toggle-leaf";
+      sp.setAttribute("aria-hidden", "true");
+      row.appendChild(sp);
+    }
+
+    const keyEl = document.createElement("span");
+    keyEl.className = "jl-schema-key";
+    if (isRoot) keyEl.classList.add("jl-schema-root");
+    keyEl.textContent = label;
+    row.appendChild(keyEl);
+
+    const types = schemaTypeLabel(node);
+    const typeWrap = document.createElement("span");
+    typeWrap.className = "jl-schema-types";
+    types.forEach((t) => {
+      const b = document.createElement("span");
+      b.className = "jl-schema-badge";
+      b.setAttribute("data-type", t);
+      b.textContent = t;
+      typeWrap.appendChild(b);
+    });
+    row.appendChild(typeWrap);
+
+    // Coverage: present-in-parent ratio for object keys; element count for arrays.
+    const meta = document.createElement("span");
+    meta.className = "jl-schema-meta";
+    const parts = [];
+    if (kind === "key" && parentCount > 0) {
+      const cov = fmtPct(node.count, parentCount);
+      if (cov && cov !== "100%") parts.push(`${cov}`);
+    }
+    parts.push(`${fmtNum(node.count)}\u00d7`);
+    meta.textContent = parts.join(" · ");
+    row.appendChild(meta);
+
+    el.appendChild(row);
+
+    if (hasChildren) {
+      const kids = document.createElement("div");
+      kids.className = "jl-schema-children";
+      if (node.items) {
+        kids.appendChild(buildSchemaNode("[ ]", node.items, depth + 1, false, node.itemsTotal, "items"));
+      }
+      // Sort keys by coverage desc then name for stable, scannable order.
+      const entries = Array.from(node.children.entries()).sort((a, b) => {
+        const ca = a[1].count, cb = b[1].count;
+        if (ca !== cb) return cb - ca;
+        return a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0;
+      });
+      const parentObjCount = node.types.get("object") || node.count;
+      entries.forEach(([k, child]) => {
+        kids.appendChild(buildSchemaNode(k, child, depth + 1, false, parentObjCount, "key"));
+      });
+      el.appendChild(kids);
+      // Auto-collapse beyond depth 2 to keep panel digestible.
+      if (depth >= 2) {
+        el.classList.add("jl-schema-collapsed");
+        row.querySelector(".jl-schema-toggle").setAttribute("aria-expanded", "false");
+      }
+    }
+
+    return el;
+  }
+
+  function schemaSummary(rootNode) {
+    let objects = 0;
+    let arrays = 0;
+    let leaves = 0;
+    let keys = 0;
+    const walk = (n) => {
+      if (n.types.has("object")) objects += n.types.get("object");
+      if (n.types.has("array")) arrays += n.types.get("array");
+      for (const t of ["string", "number", "boolean", "null"]) {
+        if (n.types.has(t)) leaves += n.types.get(t);
+      }
+      for (const child of n.children.values()) { keys++; walk(child); }
+      if (n.items) walk(n.items);
+    };
+    walk(rootNode);
+    return { objects, arrays, leaves, keys };
+  }
 
   // ---------- tree rendering ----------
   // Auto-collapse depth threshold for very large containers.
@@ -510,6 +689,7 @@
             <button class="jl-btn jl-btn-ghost" data-action="collapse" title="Collapse all" aria-label="Collapse all">${ICONS.collapse}</button>
             <button class="jl-btn" data-action="copy" title="Copy JSON" aria-label="Copy JSON">${ICONS.copy}<span>Copy</span></button>
             <button class="jl-btn" data-action="download" title="Download JSON" aria-label="Download JSON">${ICONS.download}<span>Save</span></button>
+            <button class="jl-btn jl-btn-ghost" data-action="schema" title="Inferred schema" aria-label="Inferred schema" aria-pressed="false">${ICONS.schema}<span>Schema</span></button>
             <button class="jl-btn jl-btn-ghost" data-action="raw" title="Toggle raw view" aria-label="Toggle raw view">${ICONS.raw}<span>Raw</span></button>
           </div>
         </div>
@@ -537,6 +717,20 @@
       <main class="jl-viewport">
         <div class="jl-tree-host"></div>
         <pre class="jl-raw" hidden><code></code></pre>
+        <aside class="jl-schema-panel" hidden aria-label="Inferred schema">
+          <div class="jl-schema-header">
+            <div class="jl-schema-title">
+              <span class="jl-schema-icon" aria-hidden="true">${ICONS.schema}</span>
+              <span>Inferred schema</span>
+            </div>
+            <div class="jl-schema-summary" aria-live="polite"></div>
+            <div class="jl-schema-tools">
+              <button class="jl-btn jl-btn-ghost jl-schema-copy" type="button" title="Copy schema as JSON" aria-label="Copy schema as JSON">${ICONS.copy}<span>Copy</span></button>
+              <button class="jl-btn jl-btn-ghost jl-schema-close" type="button" title="Close schema" aria-label="Close schema">${ICONS.close}</button>
+            </div>
+          </div>
+          <div class="jl-schema-body"></div>
+        </aside>
       </main>
     `;
 
@@ -756,6 +950,77 @@
         ev.preventDefault();
       }
     });
+
+    // ---------- schema panel ----------
+    let schemaModel = null;
+    let schemaRendered = false;
+    const schemaBtn = root.querySelector('[data-action="schema"]');
+    const schemaPanel = root.querySelector(".jl-schema-panel");
+    const schemaBody = root.querySelector(".jl-schema-body");
+    const schemaSummaryEl = root.querySelector(".jl-schema-summary");
+    const schemaCloseBtn = root.querySelector(".jl-schema-close");
+    const schemaCopyBtn = root.querySelector(".jl-schema-copy");
+
+    function schemaToJSON(node) {
+      const out = {};
+      const types = schemaTypeLabel(node);
+      out.type = types.length === 1 ? types[0] : types;
+      out.count = node.count;
+      if (node.children.size) {
+        out.properties = {};
+        for (const [k, child] of node.children) out.properties[k] = schemaToJSON(child);
+      }
+      if (node.items) out.items = schemaToJSON(node.items);
+      return out;
+    }
+
+    function ensureSchemaRendered() {
+      if (schemaRendered) return;
+      schemaModel = inferSchema(parsed);
+      const tree = buildSchemaTree(schemaModel);
+      schemaBody.innerHTML = "";
+      schemaBody.appendChild(tree);
+      const s = schemaSummary(schemaModel);
+      schemaSummaryEl.textContent = `${s.keys} ${s.keys === 1 ? "key" : "keys"} · ${s.objects} obj · ${s.arrays} arr · ${s.leaves} leaves`;
+      // toggle delegation
+      tree.addEventListener("click", (ev) => {
+        const target = ev.target;
+        if (!(target instanceof Element)) return;
+        const tog = target.closest(".jl-schema-toggle");
+        if (tog && !tog.classList.contains("jl-schema-toggle-leaf")) {
+          const node = tog.closest(".jl-schema-node");
+          if (node) {
+            const c = node.classList.toggle("jl-schema-collapsed");
+            tog.setAttribute("aria-expanded", String(!c));
+          }
+        }
+      });
+      schemaRendered = true;
+    }
+
+    function setSchemaOpen(open) {
+      if (open) ensureSchemaRendered();
+      schemaPanel.hidden = !open;
+      root.classList.toggle("jl-schema-open", open);
+      schemaBtn.setAttribute("aria-pressed", String(open));
+    }
+
+    schemaBtn.addEventListener("click", () => {
+      setSchemaOpen(schemaPanel.hidden);
+    });
+    schemaCloseBtn.addEventListener("click", () => setSchemaOpen(false));
+    schemaCopyBtn.addEventListener("click", async () => {
+      ensureSchemaRendered();
+      try {
+        await navigator.clipboard.writeText(JSON.stringify(schemaToJSON(schemaModel), null, 2));
+        flash(root, "Schema copied");
+      } catch {
+        flash(root, "Copy failed");
+      }
+    });
+
+    // Expose for debugging/testing without leaking into globals
+    ns.inferSchema = (val) => inferSchema(val);
 
     root.querySelector('[data-action="raw"]').addEventListener("click", () => {
       const inRaw = root.classList.toggle("jl-raw-mode");
