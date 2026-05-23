@@ -90,6 +90,8 @@
     download: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v12"/><path d="M7 11l5 5 5-5"/><path d="M4 20h16"/></svg>`,
     raw: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4h9l5 5v11a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z"/><path d="M14 4v6h6"/></svg>`,
     caret: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>`,
+    filter: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="6"/><path d="M16 16l4 4"/></svg>`,
+    close: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12"/><path d="M18 6l-12 12"/></svg>`,
     expand: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4H5a1 1 0 0 0-1 1v4"/><path d="M15 4h4a1 1 0 0 1 1 1v4"/><path d="M9 20H5a1 1 0 0 1-1-1v-4"/><path d="M15 20h4a1 1 0 0 0 1-1v-4"/></svg>`,
     collapse: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9h5V4"/><path d="M20 9h-5V4"/><path d="M4 15h5v5"/><path d="M20 15h-5v5"/></svg>`,
   };
@@ -99,13 +101,26 @@
   const AUTO_COLLAPSE_DEPTH = 2;
   const AUTO_COLLAPSE_BIG = 50;
 
-  function buildNode(key, value, depth, isLast) {
+  // Safe-identifier check for path notation.
+  const IDENT_RE = /^[A-Za-z_$][\w$]*$/;
+  function joinPath(parent, key) {
+    if (parent === null) return "$";
+    if (typeof key === "number") return `${parent}[${key}]`;
+    if (IDENT_RE.test(key)) return `${parent}.${key}`;
+    // bracket-quoted, escape backslash + quote
+    const esc = String(key).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+    return `${parent}["${esc}"]`;
+  }
+
+  function buildNode(key, value, depth, isLast, parentPath) {
     const t = typeOf(v(value));
     const isContainer = t === "object" || t === "array";
+    const pathStr = parentPath === undefined ? "$" : joinPath(parentPath, key);
 
     const node = document.createElement("div");
     node.className = "jl-node";
     node.setAttribute("data-type", t);
+    node.setAttribute("data-path", pathStr);
 
     const row = document.createElement("div");
     row.className = "jl-row";
@@ -188,7 +203,8 @@
 
       entries.forEach(([k, val], i) => {
         const last = i === entries.length - 1;
-        children.appendChild(buildNode(k, val, depth + 1, last));
+        const childKey = t === "array" ? Number(k) : k;
+        children.appendChild(buildNode(childKey, val, depth + 1, last, pathStr));
       });
       node.appendChild(children);
 
@@ -212,8 +228,157 @@
     const tree = document.createElement("div");
     tree.className = "jl-tree";
     tree.setAttribute("role", "tree");
-    tree.appendChild(buildNode(null, root, 0, true));
+    tree.appendChild(buildNode(null, root, 0, true, undefined));
     return tree;
+  }
+
+  // ---------- filter ----------
+  // Compiles a jq-style path pattern into a RegExp that matches the prefix
+  // of a node's data-path string (which always starts with "$").
+  // Supported syntax:
+  //   .key          object child by identifier
+  //   .*            any object child
+  //   [N]           array index
+  //   [] or [*]     any array element
+  //   ..key         recursive descent to first occurrence of key
+  //   chains, e.g. .items[].name, ..id, .users[0].email
+  function compileFilter(input) {
+    const raw = String(input || "").trim();
+    if (!raw) return { empty: true };
+
+    // Normalize: strip a leading "$", ensure first token starts cleanly.
+    let s = raw;
+    if (s.startsWith("$")) s = s.slice(1);
+    if (s && s[0] !== "." && s[0] !== "[") s = "." + s;
+
+    const tokens = [];
+    let i = 0;
+    while (i < s.length) {
+      const ch = s[i];
+      if (ch === "." && s[i + 1] === ".") {
+        // ..ident  (recursive descent)
+        i += 2;
+        const m = /^[A-Za-z_$][\w$]*/.exec(s.slice(i));
+        if (!m) return { error: "expected identifier after '..'" };
+        tokens.push({ kind: "rdesc", name: m[0] });
+        i += m[0].length;
+      } else if (ch === ".") {
+        i++;
+        if (s[i] === "*") {
+          tokens.push({ kind: "anykey" });
+          i++;
+        } else {
+          const m = /^[A-Za-z_$][\w$]*/.exec(s.slice(i));
+          if (!m) return { error: "expected identifier after '.'" };
+          tokens.push({ kind: "key", name: m[0] });
+          i += m[0].length;
+        }
+      } else if (ch === "[") {
+        const end = s.indexOf("]", i);
+        if (end < 0) return { error: "missing ']'" };
+        const inner = s.slice(i + 1, end).trim();
+        if (inner === "" || inner === "*") {
+          tokens.push({ kind: "anyidx" });
+        } else if (/^\d+$/.test(inner)) {
+          tokens.push({ kind: "idx", value: inner });
+        } else if (/^"[^"]*"$/.test(inner) || /^'[^']*'$/.test(inner)) {
+          const key = inner.slice(1, -1);
+          tokens.push({ kind: "qkey", name: key });
+        } else {
+          return { error: "bad bracket: " + inner };
+        }
+        i = end + 1;
+      } else {
+        return { error: "unexpected '" + ch + "'" };
+      }
+    }
+
+    if (!tokens.length) return { empty: true };
+
+    const esc = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    // path segment patterns:
+    //   identifier key     : \.<name>
+    //   any object key     : \.[A-Za-z_$][\w$]*
+    //   quoted key (any)   : (?:\.<name>|\["<escaped>"\])  (we render as bracket form to match safely)
+    //   numeric index      : \[N\]
+    //   any index          : \[\d+\]
+    //   recursive descent  : (?:\.[A-Za-z_$][\w$]*|\[\d+\]|\["[^"]*"\])*\.<name>
+    let body = "^\\$";
+    for (const tk of tokens) {
+      if (tk.kind === "key") {
+        body += "\\." + esc(tk.name) + "(?![\\w$])";
+      } else if (tk.kind === "anykey") {
+        body += "\\.[A-Za-z_$][\\w$]*";
+      } else if (tk.kind === "qkey") {
+        // match either dot-form (if identifier-safe) or bracket-quoted form
+        if (IDENT_RE.test(tk.name)) {
+          body += "(?:\\." + esc(tk.name) + "(?![\\w$])|\\[\"" + esc(tk.name) + "\"\\])";
+        } else {
+          body += "\\[\"" + esc(tk.name) + "\"\\]";
+        }
+      } else if (tk.kind === "idx") {
+        body += "\\[" + tk.value + "\\]";
+      } else if (tk.kind === "anyidx") {
+        body += "\\[\\d+\\]";
+      } else if (tk.kind === "rdesc") {
+        body += "(?:\\.[A-Za-z_$][\\w$]*|\\[\\d+\\]|\\[\"[^\"]*\"\\])*\\." + esc(tk.name) + "(?![\\w$])";
+      }
+    }
+    try {
+      return { regex: new RegExp(body) };
+    } catch (err) {
+      return { error: "invalid pattern" };
+    }
+  }
+
+  function clearFilterClasses(tree) {
+    tree.classList.remove("jl-filtering");
+    tree.querySelectorAll(".jl-filter-hide,.jl-match,.jl-match-ancestor").forEach((el) => {
+      el.classList.remove("jl-filter-hide", "jl-match", "jl-match-ancestor");
+    });
+  }
+
+  function applyFilter(tree, pattern) {
+    const result = compileFilter(pattern);
+    if (result.empty) {
+      clearFilterClasses(tree);
+      return { matches: 0, empty: true };
+    }
+    if (result.error) {
+      clearFilterClasses(tree);
+      tree.classList.add("jl-filtering");
+      return { matches: 0, error: result.error };
+    }
+    const rx = result.regex;
+    const allNodes = tree.querySelectorAll(".jl-node");
+    const matchSet = new Set();
+    const keepSet = new Set();
+    allNodes.forEach((n) => {
+      const p = n.getAttribute("data-path");
+      if (p && rx.test(p)) {
+        matchSet.add(n);
+        keepSet.add(n);
+        // descendants visible too
+        n.querySelectorAll(".jl-node").forEach((d) => keepSet.add(d));
+        // ancestors visible (and auto-expanded)
+        let cur = n.parentElement;
+        while (cur && cur !== tree) {
+          if (cur.classList && cur.classList.contains("jl-node")) {
+            keepSet.add(cur);
+            if (cur.classList.contains("jl-collapsed")) setCollapsed(cur, false);
+          }
+          cur = cur.parentElement;
+        }
+      }
+    });
+
+    tree.classList.add("jl-filtering");
+    allNodes.forEach((n) => {
+      n.classList.toggle("jl-filter-hide", !keepSet.has(n));
+      n.classList.toggle("jl-match", matchSet.has(n));
+      n.classList.toggle("jl-match-ancestor", keepSet.has(n) && !matchSet.has(n));
+    });
+    return { matches: matchSet.size };
   }
 
   // setCollapsed(node, true) collapses; setCollapsed(node) toggles.
@@ -254,22 +419,32 @@
         <div class="jl-blob jl-blob-b"></div>
       </div>
       <header class="jl-chrome">
-        <div class="jl-brand">
-          <span class="jl-brand-icon">${ICONS.lens}</span>
-          <span class="jl-brand-name">JSON Lens</span>
+        <div class="jl-chrome-top">
+          <div class="jl-brand">
+            <span class="jl-brand-icon">${ICONS.lens}</span>
+            <span class="jl-brand-name">JSON Lens</span>
+          </div>
+          <div class="jl-stats">
+            <span class="jl-badge jl-badge-kind" data-kind="${sum.kind}">${sum.kind}</span>
+            <span class="jl-stat">${sum.size} ${sum.kind === "array" ? "items" : sum.kind === "object" ? "keys" : ""}</span>
+            <span class="jl-dot"></span>
+            <span class="jl-stat">${sizeLabel}</span>
+          </div>
+          <div class="jl-actions">
+            <button class="jl-btn jl-btn-ghost" data-action="expand" title="Expand all" aria-label="Expand all">${ICONS.expand}</button>
+            <button class="jl-btn jl-btn-ghost" data-action="collapse" title="Collapse all" aria-label="Collapse all">${ICONS.collapse}</button>
+            <button class="jl-btn" data-action="copy" title="Copy JSON" aria-label="Copy JSON">${ICONS.copy}<span>Copy</span></button>
+            <button class="jl-btn" data-action="download" title="Download JSON" aria-label="Download JSON">${ICONS.download}<span>Save</span></button>
+            <button class="jl-btn jl-btn-ghost" data-action="raw" title="Toggle raw view" aria-label="Toggle raw view">${ICONS.raw}<span>Raw</span></button>
+          </div>
         </div>
-        <div class="jl-stats">
-          <span class="jl-badge jl-badge-kind" data-kind="${sum.kind}">${sum.kind}</span>
-          <span class="jl-stat">${sum.size} ${sum.kind === "array" ? "items" : sum.kind === "object" ? "keys" : ""}</span>
-          <span class="jl-dot"></span>
-          <span class="jl-stat">${sizeLabel}</span>
-        </div>
-        <div class="jl-actions">
-          <button class="jl-btn jl-btn-ghost" data-action="expand" title="Expand all" aria-label="Expand all">${ICONS.expand}</button>
-          <button class="jl-btn jl-btn-ghost" data-action="collapse" title="Collapse all" aria-label="Collapse all">${ICONS.collapse}</button>
-          <button class="jl-btn" data-action="copy" title="Copy JSON" aria-label="Copy JSON">${ICONS.copy}<span>Copy</span></button>
-          <button class="jl-btn" data-action="download" title="Download JSON" aria-label="Download JSON">${ICONS.download}<span>Save</span></button>
-          <button class="jl-btn jl-btn-ghost" data-action="raw" title="Toggle raw view" aria-label="Toggle raw view">${ICONS.raw}<span>Raw</span></button>
+        <div class="jl-chrome-filter" role="search">
+          <span class="jl-filter-icon" aria-hidden="true">${ICONS.filter}</span>
+          <input class="jl-filter-input" type="text" spellcheck="false" autocomplete="off"
+                 placeholder="Filter by path — .items[].name, ..id, .users[0]"
+                 aria-label="Filter by jq-style path" />
+          <span class="jl-filter-status" aria-live="polite"></span>
+          <button class="jl-filter-clear" type="button" title="Clear filter" aria-label="Clear filter" hidden>${ICONS.close}</button>
         </div>
       </header>
       <main class="jl-viewport">
@@ -343,6 +518,63 @@
       setAllCollapsed(tree, true);
       flash(root, "Collapsed");
     });
+    // ---------- filter wiring ----------
+    const filterInput = root.querySelector(".jl-filter-input");
+    const filterStatus = root.querySelector(".jl-filter-status");
+    const filterClear = root.querySelector(".jl-filter-clear");
+    const filterRow = root.querySelector(".jl-chrome-filter");
+
+    let filterTimer = 0;
+    const runFilter = (value) => {
+      const has = value.trim().length > 0;
+      filterClear.hidden = !has;
+      filterRow.classList.toggle("jl-filter-active", has);
+      filterRow.classList.remove("jl-filter-error");
+      if (!has) {
+        clearFilterClasses(tree);
+        filterStatus.textContent = "";
+        return;
+      }
+      const res = applyFilter(tree, value);
+      if (res.error) {
+        filterRow.classList.add("jl-filter-error");
+        filterStatus.textContent = res.error;
+        return;
+      }
+      filterStatus.textContent = res.matches === 0
+        ? "no matches"
+        : `${res.matches} ${res.matches === 1 ? "match" : "matches"}`;
+    };
+
+    filterInput.addEventListener("input", () => {
+      const val = filterInput.value;
+      clearTimeout(filterTimer);
+      filterTimer = setTimeout(() => runFilter(val), 90);
+    });
+    filterInput.addEventListener("keydown", (ev) => {
+      if (ev.key === "Escape") {
+        filterInput.value = "";
+        runFilter("");
+        ev.preventDefault();
+      }
+    });
+    filterClear.addEventListener("click", () => {
+      filterInput.value = "";
+      runFilter("");
+      filterInput.focus();
+    });
+    // Slash to focus filter, like Linear/GitHub.
+    document.addEventListener("keydown", (ev) => {
+      if (ev.key === "/" && !ev.metaKey && !ev.ctrlKey && !ev.altKey) {
+        const target = ev.target;
+        const tag = target && target.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || (target && target.isContentEditable)) return;
+        filterInput.focus();
+        filterInput.select();
+        ev.preventDefault();
+      }
+    });
+
     root.querySelector('[data-action="raw"]').addEventListener("click", () => {
       const inRaw = root.classList.toggle("jl-raw-mode");
       const rawEl = root.querySelector(".jl-raw");

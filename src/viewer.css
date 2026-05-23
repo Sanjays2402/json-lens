@@ -411,4 +411,10 @@
   .jl-type[data-type="number"]  { color: #1f6fc4; background: rgba(31,111,196,0.07); border-color: rgba(31,111,196,0.25); }
   .jl-type[data-type="boolean"] { color: #7a4ec4; background: rgba(122,78,196,0.07); border-color: rgba(122,78,196,0.25); }
   .jl-type[data-type="null"]    { color: #6c727d; background: rgba(108,114,125,0.07); border-color: rgba(108,114,125,0.25); }
+  .jl-chrome-filter { background: rgba(15, 18, 25, 0.04); }
+  .jl-chrome-filter:focus-within { background: rgba(15, 18, 25, 0.06); }
+  .jl-tree.jl-filtering .jl-node.jl-match > .jl-row {
+    background: rgba(176, 116, 16, 0.10);
+    box-shadow: inset 2px 0 0 #b07410;
+  }
 }
