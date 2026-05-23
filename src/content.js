@@ -1497,6 +1497,7 @@
     const tree = document.createElement("div");
     tree.className = "jl-tree";
     tree.setAttribute("role", "tree");
+    tree.setAttribute("tabindex", "0");
     if (PERF_MODE) tree.classList.add("jl-tree-perf");
     // Root itself is built eagerly so its direct children are visible on
     // first paint; perf mode then defers everything below that level.
@@ -2256,6 +2257,118 @@
         }
       }
     });
+
+    // ---------- vim-style navigation (j/k/h/l) ----------
+    // j: next visible row, k: previous visible row,
+    // h: collapse (or go to parent if already collapsed/leaf),
+    // l: expand (or go to first child if already expanded).
+    // gg/G jump to first/last visible node. Focused node gets `.jl-focused`
+    // ring; scrollIntoView keeps it in view.
+    let _focusedNode = null;
+    let _lastG = 0;
+    function visibleNodes() {
+      const out = [];
+      const walk = (parent) => {
+        const kids = parent.children;
+        for (let i = 0; i < kids.length; i++) {
+          const el = kids[i];
+          if (!(el instanceof Element)) continue;
+          if (el.classList.contains("jl-node")) {
+            if (el.classList.contains("jl-filter-hide")) continue;
+            out.push(el);
+            if (!el.classList.contains("jl-collapsed")) {
+              const children = el.querySelector(":scope > .jl-children");
+              if (children) walk(children);
+            }
+          } else {
+            walk(el);
+          }
+        }
+      };
+      walk(tree);
+      return out;
+    }
+    function setFocusedNode(node, opts) {
+      if (!node) return;
+      if (_focusedNode && _focusedNode !== node) _focusedNode.classList.remove("jl-focused");
+      _focusedNode = node;
+      node.classList.add("jl-focused");
+      const row = node.querySelector(":scope > .jl-row");
+      if (row && (!opts || opts.scroll !== false)) {
+        try { row.scrollIntoView({ block: "nearest", inline: "nearest" }); } catch {}
+      }
+    }
+    function hasChildren(node) {
+      return !!node.querySelector(":scope > .jl-children > .jl-node");
+    }
+    function parentNode(node) {
+      const p = node.parentElement && node.parentElement.closest(".jl-node");
+      return p && tree.contains(p) ? p : null;
+    }
+    tree.addEventListener("focus", () => {
+      if (_focusedNode && tree.contains(_focusedNode)) return;
+      const all = visibleNodes();
+      if (all.length) setFocusedNode(all[0], { scroll: false });
+    });
+    tree.addEventListener("click", (ev) => {
+      const target = ev.target;
+      if (!(target instanceof Element)) return;
+      const node = target.closest(".jl-node");
+      if (node && tree.contains(node)) setFocusedNode(node, { scroll: false });
+    }, true);
+    document.addEventListener("keydown", (ev) => {
+      // Ignore when typing into inputs/textareas/contenteditable.
+      const t = ev.target;
+      if (t instanceof Element) {
+        const tag = t.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+        if (t.isContentEditable) return;
+      }
+      if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
+      const key = ev.key;
+      if (key !== "j" && key !== "k" && key !== "h" && key !== "l" && key !== "g" && key !== "G") return;
+      const all = visibleNodes();
+      if (!all.length) return;
+      let cur = _focusedNode && tree.contains(_focusedNode) && all.indexOf(_focusedNode) >= 0
+        ? _focusedNode
+        : all[0];
+      let idx = all.indexOf(cur);
+      if (key === "j") {
+        ev.preventDefault();
+        setFocusedNode(all[Math.min(all.length - 1, idx + 1)]);
+      } else if (key === "k") {
+        ev.preventDefault();
+        setFocusedNode(all[Math.max(0, idx - 1)]);
+      } else if (key === "l") {
+        ev.preventDefault();
+        if (hasChildren(cur) && cur.classList.contains("jl-collapsed")) {
+          setCollapsed(cur, false);
+        } else if (hasChildren(cur)) {
+          const first = cur.querySelector(":scope > .jl-children > .jl-node");
+          if (first) setFocusedNode(first);
+        }
+      } else if (key === "h") {
+        ev.preventDefault();
+        if (hasChildren(cur) && !cur.classList.contains("jl-collapsed")) {
+          setCollapsed(cur, true);
+        } else {
+          const p = parentNode(cur);
+          if (p) setFocusedNode(p);
+        }
+      } else if (key === "G") {
+        ev.preventDefault();
+        setFocusedNode(all[all.length - 1]);
+      } else if (key === "g") {
+        ev.preventDefault();
+        const now = Date.now();
+        if (now - _lastG < 500) {
+          setFocusedNode(all[0]);
+          _lastG = 0;
+        } else {
+          _lastG = now;
+        }
+      }
+    }, true);
 
     // actions
     // ---------- pretty / minify toggle ----------
