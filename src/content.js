@@ -41,6 +41,160 @@
     }
   }
 
+  // ---------- diff ----------
+  // JSON Patch (RFC 6902-ish) computed structurally. Order-preserving for arrays
+  // by index. Used both to summarize and to render side-by-side overlays.
+  function computeDiff(a, b, prefix) {
+    const ops = [];
+    const path = prefix || "";
+    const ta = typeOf(a);
+    const tb = typeOf(b);
+    if (ta !== tb) {
+      ops.push({ op: "replace", path: path || "/", from: a, to: b });
+      return ops;
+    }
+    if (ta === "object") {
+      const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+      for (const k of keys) {
+        const sub = path + "/" + escapeJsonPointer(k);
+        const inA = Object.prototype.hasOwnProperty.call(a, k);
+        const inB = Object.prototype.hasOwnProperty.call(b, k);
+        if (inA && !inB) ops.push({ op: "remove", path: sub, from: a[k] });
+        else if (!inA && inB) ops.push({ op: "add", path: sub, to: b[k] });
+        else ops.push(...computeDiff(a[k], b[k], sub));
+      }
+      return ops;
+    }
+    if (ta === "array") {
+      const len = Math.max(a.length, b.length);
+      for (let i = 0; i < len; i++) {
+        const sub = path + "/" + i;
+        if (i >= a.length) ops.push({ op: "add", path: sub, to: b[i] });
+        else if (i >= b.length) ops.push({ op: "remove", path: sub, from: a[i] });
+        else ops.push(...computeDiff(a[i], b[i], sub));
+      }
+      return ops;
+    }
+    // primitives
+    if (!Object.is(a, b)) ops.push({ op: "replace", path: path || "/", from: a, to: b });
+    return ops;
+  }
+  function escapeJsonPointer(s) {
+    return String(s).replace(/~/g, "~0").replace(/\//g, "~1");
+  }
+
+  // Render a JSON tree where lines are colorized based on op map.
+  // status: "add" only present on B side, "remove" only on A, "replace" on both,
+  // "context" otherwise. Container paths get "changed" if any descendant changed.
+  function renderDiffPane(host, value, ops, side) {
+    host.innerHTML = "";
+    const opByPath = new Map();
+    const changedAncestor = new Set();
+    for (const o of ops) {
+      opByPath.set(o.path, o.op);
+      let p = o.path;
+      while (p && p.lastIndexOf("/") > 0) {
+        p = p.slice(0, p.lastIndexOf("/"));
+        changedAncestor.add(p);
+      }
+      if (o.path !== "/") changedAncestor.add("");
+    }
+    const root = renderDiffNode("", value, opByPath, changedAncestor, side, true, null);
+    if (root) host.appendChild(root);
+  }
+
+  function renderDiffNode(path, value, opByPath, changedAncestor, side, isRoot, key) {
+    const op = opByPath.get(path);
+    // On A side, hide pure adds (only exist on B); on B side, hide pure removes.
+    if (op === "add" && side === "a") return placeholderDiffLine(key, isRoot);
+    if (op === "remove" && side === "b") return placeholderDiffLine(key, isRoot);
+    const t = typeOf(value);
+    const wrap = document.createElement("div");
+    wrap.className = "jl-diff-node";
+    if (op) wrap.classList.add(`jl-diff-${op}`);
+    else if (changedAncestor.has(path)) wrap.classList.add("jl-diff-changed");
+    else wrap.classList.add("jl-diff-context");
+    wrap.setAttribute("data-path", path || "/");
+
+    const line = document.createElement("div");
+    line.className = "jl-diff-line";
+    if (key !== null) {
+      const k = document.createElement("span");
+      k.className = "jl-diff-key";
+      k.textContent = JSON.stringify(key) + ": ";
+      line.appendChild(k);
+    }
+    if (t === "object" || t === "array") {
+      const open = document.createElement("span");
+      open.className = "jl-diff-punc";
+      open.textContent = t === "array" ? "[" : "{";
+      line.appendChild(open);
+      const count = t === "array" ? value.length : Object.keys(value).length;
+      const meta = document.createElement("span");
+      meta.className = "jl-diff-meta";
+      meta.textContent = ` ${count} ${t === "array" ? "item" : "key"}${count === 1 ? "" : "s"} `;
+      line.appendChild(meta);
+      wrap.appendChild(line);
+      const body = document.createElement("div");
+      body.className = "jl-diff-children";
+      const entries = t === "array"
+        ? value.map((v, i) => [i, v])
+        : Object.keys(value).map((k) => [k, value[k]]);
+      for (const [k, v] of entries) {
+        const sub = path + "/" + (t === "array" ? k : escapeJsonPointer(k));
+        const child = renderDiffNode(sub, v, opByPath, changedAncestor, side, false, k);
+        if (child) body.appendChild(child);
+      }
+      // Also surface adds/removes that only exist on the opposite side as ghost lines
+      for (const [opPath, opKind] of opByPath) {
+        if (!opPath.startsWith(path + "/")) continue;
+        const rest = opPath.slice(path.length + 1);
+        if (rest.includes("/")) continue;
+        if (opKind === "add" && side === "a") body.appendChild(ghostLine(rest, "add"));
+        if (opKind === "remove" && side === "b") body.appendChild(ghostLine(rest, "remove"));
+      }
+      wrap.appendChild(body);
+      const close = document.createElement("div");
+      close.className = "jl-diff-line jl-diff-close-line";
+      const closeSpan = document.createElement("span");
+      closeSpan.className = "jl-diff-punc";
+      closeSpan.textContent = t === "array" ? "]" : "}";
+      close.appendChild(closeSpan);
+      wrap.appendChild(close);
+    } else {
+      const val = document.createElement("span");
+      val.className = "jl-diff-val jl-diff-val-" + t;
+      val.textContent = formatPrimitive(value);
+      line.appendChild(val);
+      wrap.appendChild(line);
+    }
+    return wrap;
+  }
+  function placeholderDiffLine(key, isRoot) {
+    const wrap = document.createElement("div");
+    wrap.className = "jl-diff-node jl-diff-absent";
+    const line = document.createElement("div");
+    line.className = "jl-diff-line";
+    line.textContent = isRoot ? "—" : (key !== null ? `${JSON.stringify(key)}: —` : "—");
+    wrap.appendChild(line);
+    return wrap;
+  }
+  function ghostLine(key, kind) {
+    const wrap = document.createElement("div");
+    wrap.className = `jl-diff-node jl-diff-${kind} jl-diff-ghost`;
+    const line = document.createElement("div");
+    line.className = "jl-diff-line";
+    line.textContent = `${JSON.stringify(decodeURIComponent(key.replace(/~1/g, "/").replace(/~0/g, "~")))}: …`;
+    wrap.appendChild(line);
+    return wrap;
+  }
+  function formatPrimitive(v) {
+    const t = typeOf(v);
+    if (t === "string") return JSON.stringify(v);
+    if (t === "null") return "null";
+    return String(v);
+  }
+
   // ---------- helpers ----------
   function typeOf(v) {
     if (v === null) return "null";
@@ -100,6 +254,7 @@
     schema: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4" width="7" height="6" rx="1.5"/><rect x="13.5" y="4" width="7" height="6" rx="1.5"/><rect x="3.5" y="14" width="7" height="6" rx="1.5"/><rect x="13.5" y="14" width="7" height="6" rx="1.5"/></svg>`,
     braces: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4c-2 0-3 1-3 3v3c0 1.5-1 2-2 2 1 0 2 .5 2 2v3c0 2 1 3 3 3"/><path d="M15 4c2 0 3 1 3 3v3c0 1.5 1 2 2 2-1 0-2 .5-2 2v3c0 2-1 3-3 3"/></svg>`,
     jsonSchema: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4h9l4 4v12a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z"/><path d="M15 4v5h5"/><path d="M10 13c-1 0-1.5.5-1.5 1.5S9 16 10 16M14 13c1 0 1.5.5 1.5 1.5S15 16 14 16"/></svg>`,
+    diff: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v14"/><path d="M5 6l3-3 3 3"/><path d="M16 21V7"/><path d="M19 18l-3 3-3-3"/></svg>`,
   };
 
   // ---------- TypeScript interface generation ----------
@@ -960,6 +1115,7 @@
             <button class="jl-btn" data-action="copy" title="Copy JSON" aria-label="Copy JSON">${ICONS.copy}<span>Copy</span></button>
             <button class="jl-btn" data-action="download" title="Download JSON" aria-label="Download JSON">${ICONS.download}<span>Save</span></button>
             <button class="jl-btn jl-btn-ghost" data-action="schema" title="Inferred schema" aria-label="Inferred schema" aria-pressed="false">${ICONS.schema}<span>Schema</span></button>
+            <button class="jl-btn jl-btn-ghost" data-action="diff" title="Diff against another JSON URL" aria-label="Diff against another JSON URL" aria-pressed="false">${ICONS.diff}<span>Diff</span></button>
             <button class="jl-btn jl-btn-ghost" data-action="raw" title="Toggle raw view" aria-label="Toggle raw view">${ICONS.raw}<span>Raw</span></button>
           </div>
         </div>
@@ -1001,6 +1157,42 @@
           </div>
           <div class="jl-schema-body"></div>
         </aside>
+        <section class="jl-diff-panel" hidden aria-label="JSON diff">
+          <div class="jl-diff-header">
+            <div class="jl-diff-title">
+              <span class="jl-diff-icon" aria-hidden="true">${ICONS.diff}</span>
+              <span>Diff against another JSON URL</span>
+            </div>
+            <div class="jl-diff-summary" aria-live="polite"></div>
+            <div class="jl-diff-tools">
+              <button class="jl-btn jl-btn-ghost jl-diff-swap" type="button" title="Swap A and B" aria-label="Swap A and B">${ICONS.diff}<span>Swap</span></button>
+              <button class="jl-btn jl-btn-ghost jl-diff-copy" type="button" title="Copy diff as JSON Patch" aria-label="Copy diff as JSON Patch">${ICONS.copy}<span>Patch</span></button>
+              <button class="jl-btn jl-btn-ghost jl-diff-close" type="button" title="Close diff" aria-label="Close diff">${ICONS.close}</button>
+            </div>
+          </div>
+          <form class="jl-diff-form" autocomplete="off">
+            <label class="jl-diff-field">
+              <span class="jl-diff-label">A</span>
+              <input class="jl-diff-input-a" type="text" spellcheck="false" placeholder="Current page URL" />
+            </label>
+            <label class="jl-diff-field">
+              <span class="jl-diff-label">B</span>
+              <input class="jl-diff-input-b" type="text" spellcheck="false" placeholder="https://example.com/other.json" />
+            </label>
+            <button class="jl-btn jl-diff-run" type="submit">${ICONS.diff}<span>Run diff</span></button>
+          </form>
+          <div class="jl-diff-status" aria-live="polite"></div>
+          <div class="jl-diff-body">
+            <div class="jl-diff-pane jl-diff-pane-a">
+              <div class="jl-diff-pane-header"><span class="jl-diff-tag" data-side="a">A</span><span class="jl-diff-pane-meta"></span></div>
+              <div class="jl-diff-pane-body"></div>
+            </div>
+            <div class="jl-diff-pane jl-diff-pane-b">
+              <div class="jl-diff-pane-header"><span class="jl-diff-tag" data-side="b">B</span><span class="jl-diff-pane-meta"></span></div>
+              <div class="jl-diff-pane-body"></div>
+            </div>
+          </div>
+        </section>
       </main>
     `;
 
@@ -1328,6 +1520,101 @@
 
     // Expose for debugging/testing without leaking into globals
     ns.inferSchema = (val) => inferSchema(val);
+
+    // ---------- diff panel ----------
+    const diffBtn = root.querySelector('[data-action="diff"]');
+    const diffPanel = root.querySelector(".jl-diff-panel");
+    const diffForm = root.querySelector(".jl-diff-form");
+    const diffInputA = root.querySelector(".jl-diff-input-a");
+    const diffInputB = root.querySelector(".jl-diff-input-b");
+    const diffStatus = root.querySelector(".jl-diff-status");
+    const diffSummary = root.querySelector(".jl-diff-summary");
+    const diffPaneA = root.querySelector(".jl-diff-pane-a .jl-diff-pane-body");
+    const diffPaneB = root.querySelector(".jl-diff-pane-b .jl-diff-pane-body");
+    const diffMetaA = root.querySelector(".jl-diff-pane-a .jl-diff-pane-meta");
+    const diffMetaB = root.querySelector(".jl-diff-pane-b .jl-diff-pane-meta");
+    const diffCloseBtn = root.querySelector(".jl-diff-close");
+    const diffSwapBtn = root.querySelector(".jl-diff-swap");
+    const diffCopyBtn = root.querySelector(".jl-diff-copy");
+    let diffOps = [];
+    let diffSideA = parsed;
+    let diffSideB = null;
+    diffInputA.value = location.href;
+
+    function setDiffOpen(open) {
+      diffPanel.hidden = !open;
+      root.classList.toggle("jl-diff-open", open);
+      diffBtn.setAttribute("aria-pressed", String(open));
+      if (open) setTimeout(() => diffInputB.focus(), 60);
+    }
+    diffBtn.addEventListener("click", () => setDiffOpen(diffPanel.hidden));
+    diffCloseBtn.addEventListener("click", () => setDiffOpen(false));
+    diffSwapBtn.addEventListener("click", () => {
+      const a = diffInputA.value;
+      diffInputA.value = diffInputB.value;
+      diffInputB.value = a;
+    });
+    diffCopyBtn.addEventListener("click", async () => {
+      if (!diffOps.length) { flash(root, "No diff yet"); return; }
+      try {
+        await navigator.clipboard.writeText(JSON.stringify(diffOps, null, 2));
+        flash(root, "Patch copied");
+      } catch { flash(root, "Copy failed"); }
+    });
+
+    async function loadJsonURL(url) {
+      if (!url) throw new Error("URL required");
+      // Use background fetch so host_permissions handle cross-origin.
+      const res = await new Promise((resolve) => {
+        try {
+          chrome.runtime.sendMessage({ type: "json-lens:fetch", url }, (r) => {
+            if (chrome.runtime.lastError) resolve({ ok: false, error: chrome.runtime.lastError.message });
+            else resolve(r || { ok: false, error: "no response" });
+          });
+        } catch (err) { resolve({ ok: false, error: String(err && err.message || err) }); }
+      });
+      if (!res || res.ok === false) throw new Error(res && res.error ? res.error : `Fetch failed${res && res.status ? " (" + res.status + ")" : ""}`);
+      try { return { value: JSON.parse(res.text), bytes: res.text.length }; }
+      catch (e) { throw new Error("Response was not valid JSON"); }
+    }
+
+    diffForm.addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      diffStatus.textContent = "";
+      diffPaneA.innerHTML = "";
+      diffPaneB.innerHTML = "";
+      diffSummary.textContent = "";
+      const urlA = diffInputA.value.trim();
+      const urlB = diffInputB.value.trim();
+      if (!urlB) { diffStatus.textContent = "Enter URL B to diff against"; return; }
+      diffStatus.textContent = "Fetching…";
+      diffPanel.classList.add("jl-diff-loading");
+      try {
+        const useCurrentForA = urlA === location.href || urlA === "";
+        const a = useCurrentForA ? { value: parsed, bytes: STATE.bytes } : await loadJsonURL(urlA);
+        const b = await loadJsonURL(urlB);
+        diffSideA = a.value;
+        diffSideB = b.value;
+        diffMetaA.textContent = `${formatBytes(a.bytes)}`;
+        diffMetaB.textContent = `${formatBytes(b.bytes)}`;
+        diffOps = computeDiff(a.value, b.value);
+        const counts = { add: 0, remove: 0, replace: 0 };
+        diffOps.forEach((o) => { counts[o.op] = (counts[o.op] || 0) + 1; });
+        diffSummary.textContent = diffOps.length === 0
+          ? "identical"
+          : `${diffOps.length} change${diffOps.length === 1 ? "" : "s"} · +${counts.add} −${counts.remove} ~${counts.replace}`;
+        renderDiffPane(diffPaneA, a.value, diffOps, "a");
+        renderDiffPane(diffPaneB, b.value, diffOps, "b");
+        diffStatus.textContent = "";
+      } catch (err) {
+        diffStatus.textContent = err && err.message ? err.message : "Diff failed";
+      } finally {
+        diffPanel.classList.remove("jl-diff-loading");
+      }
+    });
+
+    // Expose for debugging/tests
+    ns.computeDiff = computeDiff;
 
     root.querySelector('[data-action="raw"]').addEventListener("click", () => {
       const inRaw = root.classList.toggle("jl-raw-mode");

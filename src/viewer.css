@@ -813,3 +813,190 @@ mark.jl-hit.jl-hit-active {
   .jl-schema-badge[data-type="boolean"] { color: #7a4ec4; background: rgba(122,78,196,0.07); border-color: rgba(122,78,196,0.25); }
   .jl-schema-badge[data-type="null"]    { color: #6c727d; background: rgba(108,114,125,0.07); border-color: rgba(108,114,125,0.25); }
 }
+
+/* ---------- diff panel ---------- */
+.jl-diff-panel {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 20px 20px;
+  background: var(--surface-1, rgba(18, 21, 28, 0.72));
+  backdrop-filter: blur(28px) saturate(140%);
+  -webkit-backdrop-filter: blur(28px) saturate(140%);
+  border-top: 1px solid var(--border, rgba(255,255,255,0.08));
+  z-index: 8;
+  overflow: hidden;
+  animation: jl-diff-in 220ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes jl-diff-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+.jl-diff-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.jl-diff-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  letter-spacing: -0.01em;
+  font-weight: 600;
+}
+.jl-diff-title svg { width: 16px; height: 16px; opacity: 0.9; }
+.jl-diff-summary {
+  font-size: 11.5px;
+  color: var(--muted, #8a8f99);
+  font-variant-numeric: tabular-nums;
+}
+.jl-diff-tools { margin-left: auto; display: inline-flex; gap: 6px; }
+.jl-diff-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 8px;
+  align-items: stretch;
+}
+.jl-diff-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border, rgba(255,255,255,0.08));
+  border-radius: 10px;
+  padding: 8px 12px;
+  transition: border-color 180ms cubic-bezier(0.16,1,0.3,1), background 180ms cubic-bezier(0.16,1,0.3,1);
+}
+.jl-diff-field:focus-within {
+  border-color: rgba(106, 169, 255, 0.6);
+  background: rgba(106, 169, 255, 0.06);
+}
+.jl-diff-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--muted, #8a8f99);
+  text-transform: uppercase;
+}
+.jl-diff-field input {
+  flex: 1;
+  background: transparent;
+  border: 0;
+  outline: 0;
+  color: inherit;
+  font: inherit;
+  font-size: 12.5px;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+.jl-diff-run {
+  align-self: stretch;
+  padding-inline: 14px;
+}
+.jl-diff-status {
+  min-height: 16px;
+  font-size: 11.5px;
+  color: var(--muted, #8a8f99);
+}
+.jl-diff-body {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  min-height: 0;
+}
+.jl-diff-pane {
+  background: rgba(255,255,255,0.025);
+  border: 1px solid var(--border, rgba(255,255,255,0.08));
+  border-radius: 12px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.jl-diff-pane-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border, rgba(255,255,255,0.06));
+  font-size: 11.5px;
+  letter-spacing: 0.02em;
+  background: rgba(255,255,255,0.02);
+}
+.jl-diff-tag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 6px;
+  font-weight: 700;
+  font-size: 10.5px;
+}
+.jl-diff-tag[data-side="a"] { color: #f17a82; background: rgba(241,122,130,0.14); }
+.jl-diff-tag[data-side="b"] { color: #7dd58a; background: rgba(125,213,138,0.14); }
+.jl-diff-pane-meta {
+  margin-left: auto;
+  color: var(--muted, #8a8f99);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+}
+.jl-diff-pane-body {
+  flex: 1;
+  overflow: auto;
+  padding: 10px 12px 14px;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+}
+.jl-diff-node { padding-left: 0; }
+.jl-diff-children { padding-left: 14px; border-left: 1px dashed rgba(255,255,255,0.06); margin-left: 2px; }
+.jl-diff-line {
+  padding: 2px 6px;
+  border-radius: 6px;
+  white-space: pre;
+}
+.jl-diff-key { color: var(--muted, #8a8f99); }
+.jl-diff-punc { color: var(--muted, #8a8f99); }
+.jl-diff-meta { color: var(--muted, #8a8f99); font-size: 10.5px; }
+.jl-diff-val-string  { color: #7dd58a; }
+.jl-diff-val-number  { color: #6aa9ff; }
+.jl-diff-val-boolean { color: #c79bff; }
+.jl-diff-val-null    { color: #8a8f99; font-style: italic; }
+.jl-diff-add > .jl-diff-line { background: rgba(125,213,138,0.14); box-shadow: inset 2px 0 0 0 rgba(125,213,138,0.7); }
+.jl-diff-remove > .jl-diff-line { background: rgba(241,122,130,0.14); box-shadow: inset 2px 0 0 0 rgba(241,122,130,0.7); }
+.jl-diff-replace > .jl-diff-line { background: rgba(246,179,82,0.14); box-shadow: inset 2px 0 0 0 rgba(246,179,82,0.7); }
+.jl-diff-changed > .jl-diff-line { box-shadow: inset 2px 0 0 0 rgba(246,179,82,0.35); }
+.jl-diff-absent > .jl-diff-line { color: var(--muted, #8a8f99); font-style: italic; opacity: 0.65; }
+.jl-diff-ghost > .jl-diff-line { opacity: 0.55; font-style: italic; }
+.jl-diff-loading { cursor: progress; }
+.jl-diff-close-line { padding-left: 0; }
+
+/* hide tree underneath when diff open to keep things clean */
+.jl-diff-open .jl-tree-host { filter: blur(2px); opacity: 0.5; pointer-events: none; }
+
+@media (prefers-color-scheme: light) {
+  .jl-diff-panel {
+    background: rgba(255,255,255,0.78);
+    border-top-color: rgba(15,18,25,0.08);
+  }
+  .jl-diff-field { background: rgba(15,18,25,0.04); border-color: rgba(15,18,25,0.10); }
+  .jl-diff-field:focus-within { background: rgba(31,111,196,0.06); border-color: rgba(31,111,196,0.45); }
+  .jl-diff-pane { background: rgba(255,255,255,0.55); border-color: rgba(15,18,25,0.08); }
+  .jl-diff-pane-header { background: rgba(15,18,25,0.03); border-bottom-color: rgba(15,18,25,0.06); }
+  .jl-diff-children { border-left-color: rgba(15,18,25,0.10); }
+  .jl-diff-val-string  { color: #2f7a3d; }
+  .jl-diff-val-number  { color: #1f6fc4; }
+  .jl-diff-val-boolean { color: #7a4ec4; }
+  .jl-diff-tag[data-side="a"] { color: #b73e46; background: rgba(183,62,70,0.10); }
+  .jl-diff-tag[data-side="b"] { color: #2f7a3d; background: rgba(47,122,61,0.10); }
+}
+
+@media (max-width: 880px) {
+  .jl-diff-form { grid-template-columns: 1fr; }
+  .jl-diff-body { grid-template-columns: 1fr; }
+}
