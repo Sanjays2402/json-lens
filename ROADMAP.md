@@ -30,7 +30,7 @@ This file is the agent's task queue. Unchecked items get implemented in order. W
 - [x] GraphQL response detection with operation/variables panel
 - [x] Inline syntax-highlighted regex search across keys and values
 - [x] Node annotations — attach personal notes to any JSON path (persisted per-URL)
-- [ ] Auto-link detection: render URLs, emails, and IP addresses as clickable chips
+- [x] Auto-link detection: render URLs, emails, and IP addresses as clickable chips
 - [ ] Schema comparison: diff inferred schemas between two endpoints
 - [ ] Export current view as standalone shareable HTML snapshot
 - [ ] Heatmap mode — colorize numeric leaves by relative magnitude within their array

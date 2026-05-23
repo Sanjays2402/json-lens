@@ -332,6 +332,13 @@
 
   // ---------- embedded encoded-string detection (base64/JWT/UUID) ----------
   const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  // Conservative URL/email/IP detection. We only chip a string when the whole
+  // value (trimmed) is the link — never substring matches inside a sentence.
+  const URL_RE = /^https?:\/\/[^\s<>"']{3,2048}$/i;
+  const EMAIL_RE = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/;
+  const IPV4_RE = /^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])$/;
+  // Loose but bounded IPv6: at least one colon, only hex/colon, length plausible.
+  const IPV6_RE = /^(?:[0-9a-f]{0,4}:){2,7}[0-9a-f]{0,4}$/i;
   // Standard base64 (with optional padding). Length must be multiple of 4 once padded.
   const BASE64_RE = /^[A-Za-z0-9+/]+={0,2}$/;
   // base64url for JWT segments (no padding, - and _).
@@ -532,6 +539,29 @@
       span.className = "jl-str";
       const s = v.length > 120 ? v.slice(0, 117) + "…" : v;
       span.textContent = `"${s}"`;
+      const link = smartLinkHint(v);
+      if (link) {
+        const wrap = document.createElement("span");
+        wrap.className = "jl-str-wrap jl-link-wrap";
+        wrap.appendChild(span);
+        const chip = document.createElement("a");
+        chip.className = `jl-link-chip jl-link-chip-${link.kind}`;
+        chip.setAttribute("data-kind", link.kind);
+        chip.setAttribute("href", link.href);
+        chip.setAttribute("title", link.title);
+        if (link.kind === "url" || link.kind === "ip") {
+          chip.setAttribute("target", "_blank");
+          chip.setAttribute("rel", "noopener noreferrer");
+        }
+        // Stop the row's click handlers (toggle, focus, etc.) from firing when
+        // the user is clearly aiming at the link. The anchor's default
+        // navigation still fires for the actual click.
+        chip.addEventListener("click", (e) => { e.stopPropagation(); });
+        chip.addEventListener("mousedown", (e) => { e.stopPropagation(); });
+        chip.innerHTML = `${ICONS[link.icon] || ICONS.externalLink}<span class="jl-link-chip-label">${link.label}</span>`;
+        wrap.appendChild(chip);
+        return wrap;
+      }
     } else if (t === "number") {
       span.className = "jl-num";
       span.textContent = formatNumberPrimary(v);
@@ -630,6 +660,9 @@
     note: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h10l4 4v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z"/><path d="M15 4v4h4"/><path d="M8 13h8"/><path d="M8 17h5"/></svg>`,
     noteFilled: `<svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1" stroke-linejoin="round"><path d="M5 4h10l4 4v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z" opacity="0.92"/><path d="M15 4v4h4" fill="none" stroke="none"/><path d="M8 13h8M8 17h5" stroke="#0b0b10" stroke-width="1.6" stroke-linecap="round"/></svg>`,
     save: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg>`,
+    globe: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><path d="M3 12h18"/><path d="M12 4c2.5 2.5 4 5 4 8s-1.5 5.5-4 8c-2.5-2.5-4-5-4-8s1.5-5.5 4-8z"/></svg>`,
+    at: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.5"/><path d="M15.5 12V13.5a2.5 2.5 0 0 0 5 0V12a8.5 8.5 0 1 0-3.6 6.9"/></svg>`,
+    network: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="3" width="8" height="5" rx="1.2"/><rect x="3" y="16" width="7" height="5" rx="1.2"/><rect x="14" y="16" width="7" height="5" rx="1.2"/><path d="M12 8v4M6.5 16v-2h11v2"/></svg>`,
   };
 
   // ---------- history (snapshots per URL) ----------
