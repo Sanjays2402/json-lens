@@ -98,7 +98,141 @@
     expand: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4H5a1 1 0 0 0-1 1v4"/><path d="M15 4h4a1 1 0 0 1 1 1v4"/><path d="M9 20H5a1 1 0 0 1-1-1v-4"/><path d="M15 20h4a1 1 0 0 0 1-1v-4"/></svg>`,
     collapse: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9h5V4"/><path d="M20 9h-5V4"/><path d="M4 15h5v5"/><path d="M20 15h-5v5"/></svg>`,
     schema: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4" width="7" height="6" rx="1.5"/><rect x="13.5" y="4" width="7" height="6" rx="1.5"/><rect x="3.5" y="14" width="7" height="6" rx="1.5"/><rect x="13.5" y="14" width="7" height="6" rx="1.5"/></svg>`,
+    braces: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4c-2 0-3 1-3 3v3c0 1.5-1 2-2 2 1 0 2 .5 2 2v3c0 2 1 3 3 3"/><path d="M15 4c2 0 3 1 3 3v3c0 1.5 1 2 2 2-1 0-2 .5-2 2v3c0 2-1 3-3 3"/></svg>`,
   };
+
+  // ---------- TypeScript interface generation ----------
+  // Recursively walks a value and produces a deterministic TS source string.
+  // Object shapes are merged across array elements so unions/optionals
+  // emerge correctly. Identifier-safe keys stay bare, others are quoted.
+  const TS_INDENT = "  ";
+  const TS_ARRAY_SAMPLE = 500;
+
+  function isIdentKey(k) {
+    return /^[A-Za-z_$][\w$]*$/.test(String(k));
+  }
+
+  function tsNameFromKey(key, fallback) {
+    if (key === null || key === undefined) return fallback || "Root";
+    if (typeof key === "number") return "Item";
+    const cleaned = String(key).replace(/[^A-Za-z0-9_$]+/g, "_");
+    const trimmed = cleaned.replace(/^[^A-Za-z_$]+/, "").replace(/_+$/, "");
+    const head = trimmed || "Node";
+    return head.charAt(0).toUpperCase() + head.slice(1);
+  }
+
+  function shapeOf(obj) {
+    const keys = Object.create(null);
+    for (const k of Object.keys(obj)) keys[k] = { count: 1, samples: [obj[k]] };
+    return { count: 1, keys };
+  }
+
+  function mergeShape(a, b) {
+    a.count += b.count;
+    for (const k of Object.keys(b.keys)) {
+      if (a.keys[k]) {
+        a.keys[k].count += b.keys[k].count;
+        for (const s of b.keys[k].samples) a.keys[k].samples.push(s);
+      } else {
+        a.keys[k] = { count: b.keys[k].count, samples: b.keys[k].samples.slice() };
+      }
+    }
+    return a;
+  }
+
+  function tsRenderShape(shape, indent) {
+    const pad = TS_INDENT.repeat(indent + 1);
+    const close = TS_INDENT.repeat(indent);
+    const keys = Object.keys(shape.keys);
+    if (!keys.length) return "{}";
+    const lines = ["{"];
+    for (const k of keys) {
+      const info = shape.keys[k];
+      const optional = info.count < shape.count;
+      const keyTok = isIdentKey(k) ? k : JSON.stringify(k);
+      const type = tsUnionFromSamples(info.samples, indent + 1);
+      lines.push(`${pad}${keyTok}${optional ? "?" : ""}: ${type};`);
+    }
+    lines.push(`${close}}`);
+    return lines.join("\n");
+  }
+
+  function tsUnionFromSamples(samples, indent) {
+    const prims = new Set();
+    let shape = null;
+    let arrItems = null; // accumulated array element samples
+    let sawEmptyArray = false;
+    for (const s of samples) {
+      const t = typeOf(s);
+      if (t === "null") prims.add("null");
+      else if (t === "string") prims.add("string");
+      else if (t === "number") prims.add("number");
+      else if (t === "boolean") prims.add("boolean");
+      else if (t === "object") {
+        const sh = shapeOf(s);
+        shape = shape ? mergeShape(shape, sh) : sh;
+      } else if (t === "array") {
+        if (s.length === 0) sawEmptyArray = true;
+        else {
+          if (!arrItems) arrItems = [];
+          for (let i = 0; i < s.length && arrItems.length < TS_ARRAY_SAMPLE; i++) arrItems.push(s[i]);
+        }
+      }
+    }
+    const parts = [];
+    if (shape) parts.push(tsRenderShape(shape, indent));
+    if (arrItems) {
+      const inner = tsUnionFromSamples(arrItems, indent);
+      parts.push(inner.includes(" | ") ? `(${inner})[]` : `${inner}[]`);
+    } else if (sawEmptyArray) {
+      parts.push("unknown[]");
+    }
+    for (const p of prims) parts.push(p);
+    if (parts.length === 0) return "unknown";
+    if (parts.length === 1) return parts[0];
+    // Keep declarations on a single line for unions; objects in unions stay block-formatted.
+    return parts.join(" | ");
+  }
+
+  function generateTSInterface(value, name) {
+    const t = typeOf(value);
+    const header = `// JSON Lens — generated TypeScript interface for ${name}`;
+    if (t === "object") {
+      const body = tsRenderShape(shapeOf(value), 0);
+      return `${header}\nexport interface ${name} ${body}\n`;
+    }
+    if (t === "array") {
+      if (value.length === 0) {
+        return `${header}\nexport type ${name} = unknown[];\n`;
+      }
+      // If all elements are objects, emit a singular Item interface + alias.
+      let allObj = true;
+      for (const v of value) if (typeOf(v) !== "object") { allObj = false; break; }
+      if (allObj) {
+        let agg = null;
+        const limit = Math.min(value.length, TS_ARRAY_SAMPLE);
+        for (let i = 0; i < limit; i++) {
+          const sh = shapeOf(value[i]);
+          agg = agg ? mergeShape(agg, sh) : sh;
+        }
+        let itemName;
+        if (/s$/i.test(name) && name.length > 2) itemName = name.replace(/s$/i, "");
+        else itemName = name + "Item";
+        if (itemName === name) itemName = name + "Item";
+        const body = tsRenderShape(agg, 0);
+        return `${header}\nexport interface ${itemName} ${body}\n\nexport type ${name} = ${itemName}[];\n`;
+      }
+      const elt = tsUnionFromSamples(value.slice(0, TS_ARRAY_SAMPLE), 0);
+      const arr = elt.includes(" | ") ? `(${elt})[]` : `${elt}[]`;
+      return `${header}\nexport type ${name} = ${arr};\n`;
+    }
+    // primitive root
+    const lit = tsUnionFromSamples([value], 0);
+    return `${header}\nexport type ${name} = ${lit};\n`;
+  }
+
+  // Expose for testing/debugging.
+  ns.generateTSInterface = generateTSInterface;
 
   // ---------- schema inference ----------
   // Walks the parsed value and produces a tree of nodes keyed by a
@@ -371,6 +505,21 @@
       row.appendChild(trailing);
     }
 
+    // Per-row actions (hover-revealed). Only useful on containers right now.
+    if (isContainer) {
+      const actions = document.createElement("span");
+      actions.className = "jl-row-actions";
+      const tsBtn = document.createElement("button");
+      tsBtn.type = "button";
+      tsBtn.className = "jl-row-action jl-row-action-ts";
+      tsBtn.setAttribute("data-action", "copy-ts");
+      tsBtn.setAttribute("title", "Copy as TypeScript interface");
+      tsBtn.setAttribute("aria-label", "Copy as TypeScript interface");
+      tsBtn.innerHTML = `${ICONS.braces}<span class="jl-row-action-label">TS</span>`;
+      actions.appendChild(tsBtn);
+      row.appendChild(actions);
+    }
+
     node.appendChild(row);
 
     // children container
@@ -405,6 +554,49 @@
 
   // wrapper to keep typeOf-on-value clean above; identity passthrough.
   function v(x) { return x; }
+
+  // Resolve a JSON Lens path string ("$", ".key", "[N]", '["key"]' segments) to a
+  // value inside the parsed root. Returns { ok, value } or { ok: false }.
+  const PATH_TOKEN_RE = /\.([A-Za-z_$][\w$]*)|\[(\d+)\]|\["((?:\\.|[^"\\])*)"\]/g;
+  function resolvePath(root, pathStr) {
+    if (!pathStr || pathStr === "$") return { ok: true, value: root };
+    let cur = root;
+    let i = 1; // skip the leading "$"
+    PATH_TOKEN_RE.lastIndex = i;
+    let m;
+    let consumed = 1;
+    while ((m = PATH_TOKEN_RE.exec(pathStr)) !== null) {
+      if (m.index !== consumed) return { ok: false };
+      if (cur === null || typeof cur !== "object") return { ok: false };
+      if (m[1] !== undefined) {
+        cur = cur[m[1]];
+      } else if (m[2] !== undefined) {
+        cur = cur[Number(m[2])];
+      } else {
+        const key = m[3].replace(/\\"/g, "\"").replace(/\\\\/g, "\\");
+        cur = cur[key];
+      }
+      consumed = PATH_TOKEN_RE.lastIndex;
+    }
+    if (consumed !== pathStr.length) return { ok: false };
+    return { ok: true, value: cur };
+  }
+
+  // Derive a PascalCase interface name from a path string + the value's shape.
+  function tsNameForPath(pathStr, value) {
+    if (!pathStr || pathStr === "$") return "Root";
+    // last identifier segment, else "Item" for array elements
+    let last = null;
+    PATH_TOKEN_RE.lastIndex = 0;
+    let m;
+    while ((m = PATH_TOKEN_RE.exec(pathStr)) !== null) {
+      if (m[1] !== undefined) last = m[1];
+      else if (m[3] !== undefined) last = m[3];
+      else last = null; // numeric index resets — element of an array
+    }
+    if (!last) return Array.isArray(value) ? "Items" : "Item";
+    return tsNameFromKey(last);
+  }
 
   function buildTree(root) {
     const tree = document.createElement("div");
@@ -742,6 +934,29 @@
     tree.addEventListener("click", (ev) => {
       const target = ev.target;
       if (!(target instanceof Element)) return;
+      const actionBtn = target.closest(".jl-row-action");
+      if (actionBtn) {
+        ev.stopPropagation();
+        const action = actionBtn.getAttribute("data-action");
+        const node = actionBtn.closest(".jl-node");
+        if (!node) return;
+        const pathStr = node.getAttribute("data-path") || "$";
+        if (action === "copy-ts") {
+          const resolved = resolvePath(parsed, pathStr);
+          if (!resolved.ok) { flash(root, "Copy failed"); return; }
+          const name = tsNameForPath(pathStr, resolved.value);
+          const src = generateTSInterface(resolved.value, name);
+          (async () => {
+            try {
+              await navigator.clipboard.writeText(src);
+              flash(root, `Copied ${name} as TS`);
+            } catch {
+              flash(root, "Copy failed");
+            }
+          })();
+        }
+        return;
+      }
       const tog = target.closest(".jl-toggle");
       if (tog && !tog.classList.contains("jl-toggle-leaf")) {
         const node = tog.closest(".jl-node");
