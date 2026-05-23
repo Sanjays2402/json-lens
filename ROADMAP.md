@@ -9,7 +9,7 @@ This file is the agent's task queue. Unchecked items get implemented in order. W
 - [x] Search keys and values with highlight
 - [x] Inferred schema panel (types + counts)
 - [x] Copy node as TypeScript interface
-- [ ] Copy node as JSON Schema
+- [x] Copy node as JSON Schema
 - [ ] Diff two JSON URLs side-by-side
 - [ ] Pretty-print + minify toggle
 - [ ] Path breadcrumb on hover

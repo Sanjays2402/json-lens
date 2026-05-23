@@ -99,6 +99,7 @@
     collapse: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9h5V4"/><path d="M20 9h-5V4"/><path d="M4 15h5v5"/><path d="M20 15h-5v5"/></svg>`,
     schema: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4" width="7" height="6" rx="1.5"/><rect x="13.5" y="4" width="7" height="6" rx="1.5"/><rect x="3.5" y="14" width="7" height="6" rx="1.5"/><rect x="13.5" y="14" width="7" height="6" rx="1.5"/></svg>`,
     braces: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4c-2 0-3 1-3 3v3c0 1.5-1 2-2 2 1 0 2 .5 2 2v3c0 2 1 3 3 3"/><path d="M15 4c2 0 3 1 3 3v3c0 1.5 1 2 2 2-1 0-2 .5-2 2v3c0 2-1 3-3 3"/></svg>`,
+    jsonSchema: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4h9l4 4v12a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z"/><path d="M15 4v5h5"/><path d="M10 13c-1 0-1.5.5-1.5 1.5S9 16 10 16M14 13c1 0 1.5.5 1.5 1.5S15 16 14 16"/></svg>`,
   };
 
   // ---------- TypeScript interface generation ----------
@@ -233,6 +234,75 @@
 
   // Expose for testing/debugging.
   ns.generateTSInterface = generateTSInterface;
+
+  // ---------- JSON Schema generation ----------
+  // Walks the value and emits a draft-07 JSON Schema. Arrays of objects
+  // merge shape across elements so `required` reflects keys present in
+  // every observed sample. Mixed type observations collapse to type arrays
+  // for primitives and to `anyOf` when complex types mix with primitives.
+  const SCHEMA_ARRAY_SAMPLE = 500;
+  const SCHEMA_DRAFT = "http://json-schema.org/draft-07/schema#";
+
+  function jsonSchemaForShape(shape) {
+    const props = {};
+    const required = [];
+    for (const k of Object.keys(shape.keys)) {
+      const info = shape.keys[k];
+      props[k] = jsonSchemaFromSamples(info.samples);
+      if (info.count === shape.count) required.push(k);
+    }
+    const out = { type: "object", properties: props };
+    if (required.length) out.required = required;
+    return out;
+  }
+
+  function jsonSchemaFromSamples(samples) {
+    const prims = new Set();
+    let shape = null;
+    let arrItems = null;
+    let sawEmptyArray = false;
+    for (const s of samples) {
+      const t = typeOf(s);
+      if (t === "null") prims.add("null");
+      else if (t === "string") prims.add("string");
+      else if (t === "number") prims.add(Number.isInteger(s) ? "integer" : "number");
+      else if (t === "boolean") prims.add("boolean");
+      else if (t === "object") {
+        const sh = shapeOf(s);
+        shape = shape ? mergeShape(shape, sh) : sh;
+      } else if (t === "array") {
+        if (s.length === 0) sawEmptyArray = true;
+        else {
+          if (!arrItems) arrItems = [];
+          for (let i = 0; i < s.length && arrItems.length < SCHEMA_ARRAY_SAMPLE; i++) arrItems.push(s[i]);
+        }
+      }
+    }
+    // integer is a refinement of number — if both seen, widen to number.
+    if (prims.has("integer") && prims.has("number")) prims.delete("integer");
+
+    const branches = [];
+    if (shape) branches.push(jsonSchemaForShape(shape));
+    if (arrItems) branches.push({ type: "array", items: jsonSchemaFromSamples(arrItems) });
+    else if (sawEmptyArray) branches.push({ type: "array" });
+    if (prims.size) {
+      const arr = [...prims].sort();
+      branches.push({ type: arr.length === 1 ? arr[0] : arr });
+    }
+    if (branches.length === 0) return {};
+    if (branches.length === 1) return branches[0];
+    return { anyOf: branches };
+  }
+
+  function generateJSONSchema(value, title) {
+    const body = jsonSchemaFromSamples([value]);
+    const out = { $schema: SCHEMA_DRAFT };
+    if (title) out.title = title;
+    Object.assign(out, body);
+    return out;
+  }
+
+  ns.generateJSONSchema = generateJSONSchema;
 
   // ---------- schema inference ----------
   // Walks the parsed value and produces a tree of nodes keyed by a
@@ -517,6 +587,14 @@
       tsBtn.setAttribute("aria-label", "Copy as TypeScript interface");
       tsBtn.innerHTML = `${ICONS.braces}<span class="jl-row-action-label">TS</span>`;
       actions.appendChild(tsBtn);
+      const jsBtn = document.createElement("button");
+      jsBtn.type = "button";
+      jsBtn.className = "jl-row-action jl-row-action-schema";
+      jsBtn.setAttribute("data-action", "copy-jsonschema");
+      jsBtn.setAttribute("title", "Copy as JSON Schema");
+      jsBtn.setAttribute("aria-label", "Copy as JSON Schema");
+      jsBtn.innerHTML = `${ICONS.jsonSchema}<span class="jl-row-action-label">Schema</span>`;
+      actions.appendChild(jsBtn);
       row.appendChild(actions);
     }
 
@@ -950,6 +1028,20 @@
             try {
               await navigator.clipboard.writeText(src);
               flash(root, `Copied ${name} as TS`);
+            } catch {
+              flash(root, "Copy failed");
+            }
+          })();
+        } else if (action === "copy-jsonschema") {
+          const resolved = resolvePath(parsed, pathStr);
+          if (!resolved.ok) { flash(root, "Copy failed"); return; }
+          const name = tsNameForPath(pathStr, resolved.value);
+          const schema = generateJSONSchema(resolved.value, name);
+          const src = JSON.stringify(schema, null, 2) + "\n";
+          (async () => {
+            try {
+              await navigator.clipboard.writeText(src);
+              flash(root, `Copied ${name} as JSON Schema`);
             } catch {
               flash(root, "Copy failed");
             }
