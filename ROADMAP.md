@@ -15,5 +15,5 @@ This file is the agent's task queue. Unchecked items get implemented in order. W
 - [x] Path breadcrumb on hover
 - [x] Export filtered subtree
 - [x] Performance mode for >10MB JSON (virtualized tree)
-- [ ] Liquid-glass overlay UI
+- [x] Liquid-glass overlay UI
 - [ ] Dark/light theme + monospace tweaks

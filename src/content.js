@@ -259,6 +259,9 @@
     diff: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v14"/><path d="M5 6l3-3 3 3"/><path d="M16 21V7"/><path d="M19 18l-3 3-3-3"/></svg>`,
     home: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11l8-7 8 7"/><path d="M6 10v9a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-9"/></svg>`,
     crumbSep: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 6l6 6-6 6"/></svg>`,
+    command: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3z"/></svg>`,
+    sparkle: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4l1.6 4.4L18 10l-4.4 1.6L12 16l-1.6-4.4L6 10l4.4-1.6z"/><path d="M19 16l.7 1.8L21.5 18.5l-1.8.7L19 21l-.7-1.8L16.5 18.5l1.8-.7z"/></svg>`,
+    enterKey: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 7v5a3 3 0 0 1-3 3H6"/><path d="M10 11l-4 4 4 4"/></svg>`,
   };
 
   // ---------- TypeScript interface generation ----------
@@ -1192,6 +1195,7 @@
             <button class="jl-btn" data-action="download" title="Download JSON" aria-label="Download JSON">${ICONS.download}<span>Save</span></button>
             <button class="jl-btn jl-btn-ghost" data-action="schema" title="Inferred schema" aria-label="Inferred schema" aria-pressed="false">${ICONS.schema}<span>Schema</span></button>
             <button class="jl-btn jl-btn-ghost" data-action="diff" title="Diff against another JSON URL" aria-label="Diff against another JSON URL" aria-pressed="false">${ICONS.diff}<span>Diff</span></button>
+            <button class="jl-btn jl-btn-ghost" data-action="palette" title="Command palette (⌘⇧P)" aria-label="Command palette">${ICONS.command}<span>Actions</span></button>
             <button class="jl-btn jl-btn-ghost" data-action="raw" title="Toggle raw view" aria-label="Toggle raw view">${ICONS.raw}<span>Raw</span></button>
           </div>
         </div>
@@ -1276,6 +1280,24 @@
         <div class="jl-breadcrumb" hidden role="status" aria-label="JSON path of hovered node">
           <div class="jl-crumbs" role="list"></div>
           <button class="jl-crumb-copy" type="button" title="Copy path" aria-label="Copy path">${ICONS.copy}</button>
+        </div>
+        <div class="jl-palette-backdrop" hidden aria-hidden="true"></div>
+        <div class="jl-palette" hidden role="dialog" aria-modal="true" aria-label="Command palette">
+          <div class="jl-palette-search">
+            <span class="jl-palette-search-icon" aria-hidden="true">${ICONS.sparkle}</span>
+            <input class="jl-palette-input" type="text" spellcheck="false" autocomplete="off" placeholder="Run a command — type to filter" aria-label="Command palette" />
+            <kbd class="jl-palette-kbd">esc</kbd>
+          </div>
+          <div class="jl-palette-list" role="listbox" aria-label="Available commands"></div>
+          <div class="jl-palette-empty" hidden>
+            <span class="jl-palette-empty-icon" aria-hidden="true">${ICONS.sparkle}</span>
+            <span>No matching commands</span>
+          </div>
+          <div class="jl-palette-foot">
+            <span><kbd>↑</kbd><kbd>↓</kbd> navigate</span>
+            <span><kbd>↵</kbd> run</span>
+            <span><kbd>esc</kbd> close</span>
+          </div>
         </div>
       </main>
     `;
@@ -1919,6 +1941,142 @@
       if (typeof CSS !== "undefined" && CSS.escape) return CSS.escape(s);
       return String(s).replace(/["\\]/g, "\\$&");
     }
+
+    // ---------- command palette ----------
+    const paletteBtn = root.querySelector('[data-action="palette"]');
+    const palette = root.querySelector(".jl-palette");
+    const paletteBack = root.querySelector(".jl-palette-backdrop");
+    const paletteInput = root.querySelector(".jl-palette-input");
+    const paletteList = root.querySelector(".jl-palette-list");
+    const paletteEmpty = root.querySelector(".jl-palette-empty");
+    let paletteActiveIdx = 0;
+    let paletteVisible = [];
+
+    function paletteCommands() {
+      const inRaw = root.classList.contains("jl-raw-mode");
+      const compact = formatBtn && formatBtn.getAttribute("aria-pressed") === "true";
+      return [
+        { id: "expand", label: "Expand all nodes", hint: "Tree", icon: ICONS.expand, run: () => root.querySelector('[data-action="expand"]').click() },
+        { id: "collapse", label: "Collapse all nodes", hint: "Tree", icon: ICONS.collapse, run: () => root.querySelector('[data-action="collapse"]').click() },
+        { id: "format", label: compact ? "Pretty-print JSON" : "Minify JSON", hint: "Format", icon: compact ? ICONS.pretty : ICONS.minify, run: () => formatBtn.click() },
+        { id: "copy", label: "Copy JSON to clipboard", hint: "Clipboard", icon: ICONS.copy, run: () => root.querySelector('[data-action="copy"]').click() },
+        { id: "download", label: "Download JSON", hint: "File", icon: ICONS.download, run: () => root.querySelector('[data-action="download"]').click() },
+        { id: "schema", label: "Toggle inferred schema panel", hint: "Panel", icon: ICONS.schema, run: () => root.querySelector('[data-action="schema"]').click() },
+        { id: "diff", label: "Toggle diff against another URL", hint: "Panel", icon: ICONS.diff, run: () => root.querySelector('[data-action="diff"]').click() },
+        { id: "raw", label: inRaw ? "Show interactive tree" : "Show raw JSON text", hint: "View", icon: ICONS.raw, run: () => root.querySelector('[data-action="raw"]').click() },
+        { id: "focus-search", label: "Focus search bar", hint: "⌘K", icon: ICONS.search, run: () => { setPaletteOpen(false); searchInput.focus(); searchInput.select(); } },
+        { id: "focus-filter", label: "Focus jq-style path filter", hint: "/", icon: ICONS.filter, run: () => { setPaletteOpen(false); filterInput.focus(); filterInput.select(); } },
+      ];
+    }
+
+    function fuzzyScore(text, query) {
+      if (!query) return 1;
+      const t = text.toLowerCase();
+      const q = query.toLowerCase();
+      if (t.includes(q)) return 100 - (t.indexOf(q));
+      // subsequence match
+      let ti = 0, qi = 0, score = 0, streak = 0;
+      while (ti < t.length && qi < q.length) {
+        if (t[ti] === q[qi]) { qi++; streak++; score += 2 + streak; }
+        else streak = 0;
+        ti++;
+      }
+      return qi === q.length ? score : 0;
+    }
+
+    function renderPaletteList() {
+      const query = paletteInput.value.trim();
+      const cmds = paletteCommands()
+        .map((c) => ({ c, s: fuzzyScore(c.label + " " + c.hint, query) }))
+        .filter((x) => x.s > 0)
+        .sort((a, b) => b.s - a.s)
+        .map((x) => x.c);
+      paletteVisible = cmds;
+      paletteList.innerHTML = "";
+      if (!cmds.length) {
+        paletteEmpty.hidden = false;
+        paletteList.hidden = true;
+        return;
+      }
+      paletteEmpty.hidden = true;
+      paletteList.hidden = false;
+      const frag = document.createDocumentFragment();
+      cmds.forEach((c, i) => {
+        const item = document.createElement("button");
+        item.type = "button";
+        item.className = "jl-palette-item" + (i === paletteActiveIdx ? " jl-palette-item-active" : "");
+        item.setAttribute("role", "option");
+        item.setAttribute("data-idx", String(i));
+        const iconSpan = document.createElement("span"); iconSpan.className = "jl-palette-item-icon"; iconSpan.innerHTML = c.icon;
+        const labelSpan = document.createElement("span"); labelSpan.className = "jl-palette-item-label"; labelSpan.textContent = c.label;
+        const hintSpan = document.createElement("span"); hintSpan.className = "jl-palette-item-hint"; hintSpan.textContent = c.hint;
+        item.appendChild(iconSpan); item.appendChild(labelSpan); item.appendChild(hintSpan);
+        frag.appendChild(item);
+      });
+      paletteList.appendChild(frag);
+    }
+
+    function setPaletteActive(i) {
+      if (!paletteVisible.length) return;
+      const n = paletteVisible.length;
+      paletteActiveIdx = ((i % n) + n) % n;
+      const items = paletteList.querySelectorAll(".jl-palette-item");
+      items.forEach((el, k) => el.classList.toggle("jl-palette-item-active", k === paletteActiveIdx));
+      const active = items[paletteActiveIdx];
+      if (active) active.scrollIntoView({ block: "nearest" });
+    }
+
+    function setPaletteOpen(open) {
+      palette.hidden = !open;
+      paletteBack.hidden = !open;
+      root.classList.toggle("jl-palette-open", open);
+      paletteBtn.setAttribute("aria-pressed", String(open));
+      if (open) {
+        paletteInput.value = "";
+        paletteActiveIdx = 0;
+        renderPaletteList();
+        requestAnimationFrame(() => paletteInput.focus());
+      }
+    }
+
+    paletteBtn.addEventListener("click", () => setPaletteOpen(palette.hidden));
+    paletteBack.addEventListener("click", () => setPaletteOpen(false));
+    paletteInput.addEventListener("input", () => { paletteActiveIdx = 0; renderPaletteList(); });
+    paletteInput.addEventListener("keydown", (ev) => {
+      if (ev.key === "ArrowDown") { ev.preventDefault(); setPaletteActive(paletteActiveIdx + 1); }
+      else if (ev.key === "ArrowUp") { ev.preventDefault(); setPaletteActive(paletteActiveIdx - 1); }
+      else if (ev.key === "Enter") {
+        ev.preventDefault();
+        const cmd = paletteVisible[paletteActiveIdx];
+        if (cmd) { setPaletteOpen(false); try { cmd.run(); } catch (err) { console.debug("[json-lens] palette cmd error", err); } }
+      } else if (ev.key === "Escape") {
+        ev.preventDefault();
+        setPaletteOpen(false);
+      }
+    });
+    paletteList.addEventListener("click", (ev) => {
+      const item = ev.target.closest(".jl-palette-item");
+      if (!item) return;
+      const idx = Number(item.getAttribute("data-idx"));
+      const cmd = paletteVisible[idx];
+      if (cmd) { setPaletteOpen(false); try { cmd.run(); } catch (err) { console.debug("[json-lens] palette cmd error", err); } }
+    });
+    paletteList.addEventListener("mousemove", (ev) => {
+      const item = ev.target.closest(".jl-palette-item");
+      if (!item) return;
+      const idx = Number(item.getAttribute("data-idx"));
+      if (!Number.isNaN(idx)) setPaletteActive(idx);
+    });
+    document.addEventListener("keydown", (ev) => {
+      const mod = ev.metaKey || ev.ctrlKey;
+      if (mod && ev.shiftKey && (ev.key === "p" || ev.key === "P")) {
+        ev.preventDefault();
+        setPaletteOpen(palette.hidden);
+      } else if (!palette.hidden && ev.key === "Escape") {
+        ev.preventDefault();
+        setPaletteOpen(false);
+      }
+    });
 
     root.querySelector('[data-action="raw"]').addEventListener("click", () => {
       const inRaw = root.classList.toggle("jl-raw-mode");
