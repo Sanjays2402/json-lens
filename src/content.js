@@ -646,6 +646,50 @@
   const AUTO_COLLAPSE_DEPTH = 2;
   const AUTO_COLLAPSE_BIG = 50;
 
+  // ---------- performance mode ----------
+  // For documents above this raw byte threshold the tree is materialized
+  // lazily: only the root's direct children are built up-front; deeper
+  // containers render their children the first time they are expanded.
+  // This keeps initial paint cheap for multi-MB payloads where a full
+  // recursive DOM build would otherwise stall the page.
+  const PERF_BYTE_THRESHOLD = 10 * 1024 * 1024;
+  let PERF_MODE = false;
+  const LAZY_VALUES = new WeakMap();
+
+  function materializeNode(node) {
+    if (!node || node.getAttribute("data-lazy") !== "pending") return false;
+    const info = LAZY_VALUES.get(node);
+    if (!info) return false;
+    const { value, pathStr, depth } = info;
+    const children = node.querySelector(":scope > .jl-children");
+    if (!children) return false;
+    const t = typeOf(value);
+    const entries = t === "array"
+      ? value.map((it, i) => [i, it])
+      : Object.entries(value);
+    const frag = document.createDocumentFragment();
+    entries.forEach(([k, val], i) => {
+      const last = i === entries.length - 1;
+      const childKey = t === "array" ? Number(k) : k;
+      frag.appendChild(buildNode(childKey, val, depth + 1, last, pathStr, { lazy: PERF_MODE }));
+    });
+    children.appendChild(frag);
+    node.setAttribute("data-lazy", "done");
+    LAZY_VALUES.delete(node);
+    return true;
+  }
+
+  function materializeAll(tree) {
+    // Drain lazy queue. Newly-materialized nodes may expose more lazy
+    // descendants, so loop until none remain.
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const pending = tree.querySelectorAll('.jl-node[data-lazy="pending"]');
+      if (pending.length === 0) return;
+      pending.forEach(materializeNode);
+    }
+  }
+
   // Safe-identifier check for path notation.
   const IDENT_RE = /^[A-Za-z_$][\w$]*$/;
   function joinPath(parent, key) {
@@ -657,10 +701,11 @@
     return `${parent}["${esc}"]`;
   }
 
-  function buildNode(key, value, depth, isLast, parentPath) {
+  function buildNode(key, value, depth, isLast, parentPath, opts) {
     const t = typeOf(v(value));
     const isContainer = t === "object" || t === "array";
     const pathStr = parentPath === undefined ? "$" : joinPath(parentPath, key);
+    const lazy = !!(opts && opts.lazy);
 
     const node = document.createElement("div");
     node.className = "jl-node";
@@ -764,25 +809,34 @@
       const children = document.createElement("div");
       children.className = "jl-children";
       children.setAttribute("role", "group");
+      node.appendChild(children);
 
       const entries = t === "array"
         ? value.map((it, i) => [i, it])
         : Object.entries(value);
 
-      entries.forEach(([k, val], i) => {
-        const last = i === entries.length - 1;
-        const childKey = t === "array" ? Number(k) : k;
-        children.appendChild(buildNode(childKey, val, depth + 1, last, pathStr));
-      });
-      node.appendChild(children);
-
-      // auto-collapse heuristic: deep nodes or large containers
-      const shouldCollapse =
-        depth >= AUTO_COLLAPSE_DEPTH && entries.length > 0 &&
-        (entries.length >= AUTO_COLLAPSE_BIG || depth >= AUTO_COLLAPSE_DEPTH + 1);
-      if (shouldCollapse) {
+      if (lazy && entries.length > 0) {
+        // Defer child construction until the first expand.
+        node.setAttribute("data-lazy", "pending");
+        node.classList.add("jl-lazy");
+        LAZY_VALUES.set(node, { value, pathStr, depth });
         node.classList.add("jl-collapsed");
         row.querySelector(".jl-toggle").setAttribute("aria-expanded", "false");
+      } else {
+        entries.forEach(([k, val], i) => {
+          const last = i === entries.length - 1;
+          const childKey = t === "array" ? Number(k) : k;
+          children.appendChild(buildNode(childKey, val, depth + 1, last, pathStr, { lazy: PERF_MODE }));
+        });
+
+        // auto-collapse heuristic: deep nodes or large containers
+        const shouldCollapse =
+          depth >= AUTO_COLLAPSE_DEPTH && entries.length > 0 &&
+          (entries.length >= AUTO_COLLAPSE_BIG || depth >= AUTO_COLLAPSE_DEPTH + 1);
+        if (shouldCollapse) {
+          node.classList.add("jl-collapsed");
+          row.querySelector(".jl-toggle").setAttribute("aria-expanded", "false");
+        }
       }
     }
 
@@ -839,7 +893,10 @@
     const tree = document.createElement("div");
     tree.className = "jl-tree";
     tree.setAttribute("role", "tree");
-    tree.appendChild(buildNode(null, root, 0, true, undefined));
+    if (PERF_MODE) tree.classList.add("jl-tree-perf");
+    // Root itself is built eagerly so its direct children are visible on
+    // first paint; perf mode then defers everything below that level.
+    tree.appendChild(buildNode(null, root, 0, true, undefined, { lazy: false }));
     return tree;
   }
 
@@ -990,6 +1047,9 @@
       clearSearch(tree);
       return { matches: [], empty: true };
     }
+    // Search must consider the whole document, even nodes whose DOM has
+    // not been materialized yet in perf mode.
+    if (PERF_MODE) materializeAll(tree);
     const rx = new RegExp(escRegex(q), "gi");
     clearSearch(tree);
     tree.classList.add("jl-searching");
@@ -1032,6 +1092,9 @@
       tree.classList.add("jl-filtering");
       return { matches: 0, error: result.error };
     }
+    // Path filter operates on `data-path` attrs — materialize everything
+    // in perf mode so deferred nodes participate.
+    if (PERF_MODE) materializeAll(tree);
     const rx = result.regex;
     const allNodes = tree.querySelectorAll(".jl-node");
     const matchSet = new Set();
@@ -1068,12 +1131,19 @@
   function setCollapsed(node, collapsed) {
     const isCollapsed = node.classList.contains("jl-collapsed");
     const next = typeof collapsed === "boolean" ? collapsed : !isCollapsed;
+    // Expanding a lazy node materializes its children on first reveal.
+    if (!next && node.getAttribute("data-lazy") === "pending") {
+      materializeNode(node);
+    }
     node.classList.toggle("jl-collapsed", next);
     const tog = node.querySelector(":scope > .jl-row > .jl-toggle");
     if (tog) tog.setAttribute("aria-expanded", String(!next));
   }
 
   function setAllCollapsed(treeRoot, collapsed) {
+    // Expand-all in perf mode forces full materialization so every container
+    // can be revealed; the user explicitly opted into the cost.
+    if (collapsed === false) materializeAll(treeRoot);
     const nodes = treeRoot.querySelectorAll(".jl-node[data-type='object'], .jl-node[data-type='array']");
     nodes.forEach((n) => setCollapsed(n, collapsed));
   }
@@ -1112,6 +1182,7 @@
             <span class="jl-stat">${sum.size} ${sum.kind === "array" ? "items" : sum.kind === "object" ? "keys" : ""}</span>
             <span class="jl-dot"></span>
             <span class="jl-stat">${sizeLabel}</span>
+            ${PERF_MODE ? `<span class="jl-dot"></span><span class="jl-badge jl-badge-perf" title="Large document — deeper nodes load on expand">perf</span>` : ""}
           </div>
           <div class="jl-actions">
             <button class="jl-btn jl-btn-ghost" data-action="expand" title="Expand all" aria-label="Expand all">${ICONS.expand}</button>
@@ -1888,6 +1959,8 @@
     STATE.parsed = parsed.value;
     STATE.rawText = rawText;
     STATE.bytes = rawText.length;
+    PERF_MODE = rawText.length >= PERF_BYTE_THRESHOLD;
+    STATE.perfMode = PERF_MODE;
 
     injectStylesheet();
     const shell = buildShell(parsed.value, rawText);
