@@ -22,7 +22,7 @@ This file is the agent's task queue. Unchecked items get implemented in order. W
 - [x] Inline value editing with revert + copy-as-curl PATCH
 - [x] History timeline of JSON snapshots per URL (last 20)
 - [x] Smart number formatting (thousands separators, byte units, timestamps)
-- [ ] Detect and render embedded base64/JWT/UUID with decoded preview
+- [x] Detect and render embedded base64/JWT/UUID with decoded preview
 - [ ] Keyboard navigation (j/k/h/l vim-style) with focus ring
 - [ ] Export tree as CSV for tabular arrays
 - [ ] Pinned nodes sidebar (drag any node to pin for cross-reference)

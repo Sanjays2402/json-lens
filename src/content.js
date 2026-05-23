@@ -288,6 +288,201 @@
     return String(v);
   }
 
+  // ---------- embedded encoded-string detection (base64/JWT/UUID) ----------
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  // Standard base64 (with optional padding). Length must be multiple of 4 once padded.
+  const BASE64_RE = /^[A-Za-z0-9+/]+={0,2}$/;
+  // base64url for JWT segments (no padding, - and _).
+  const BASE64URL_RE = /^[A-Za-z0-9_-]+$/;
+  const JWT_RE = /^([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)$/;
+
+  function b64urlToB64(s) {
+    let t = s.replace(/-/g, "+").replace(/_/g, "/");
+    const pad = t.length % 4;
+    if (pad) t += "=".repeat(4 - pad);
+    return t;
+  }
+  function tryAtob(s) {
+    try { return atob(s); } catch { return null; }
+  }
+  function bytesToUtf8(bin) {
+    if (bin == null) return null;
+    try {
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i) & 0xff;
+      // TextDecoder with fatal=true throws on invalid sequences.
+      return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    } catch { return null; }
+  }
+  function isMostlyPrintable(s) {
+    if (!s || !s.length) return false;
+    let ok = 0;
+    for (let i = 0; i < s.length; i++) {
+      const c = s.charCodeAt(i);
+      if (c === 9 || c === 10 || c === 13 || (c >= 32 && c < 127) || c >= 0xa0) ok++;
+    }
+    return ok / s.length >= 0.92;
+  }
+  function uuidVersion(s) {
+    const m = /^[0-9a-f]{8}-[0-9a-f]{4}-([1-5])[0-9a-f]{3}-([89ab])[0-9a-f]{3}-[0-9a-f]{12}$/i.exec(s);
+    return m ? Number(m[1]) : null;
+  }
+  function decodeJwt(s) {
+    const m = JWT_RE.exec(s);
+    if (!m) return null;
+    const [, h, p, _sig] = m;
+    const hdr = tryAtob(b64urlToB64(h));
+    const pl  = tryAtob(b64urlToB64(p));
+    if (hdr == null || pl == null) return null;
+    const hdrTxt = bytesToUtf8(hdr);
+    const plTxt  = bytesToUtf8(pl);
+    if (!hdrTxt || !plTxt) return null;
+    let header, payload;
+    try { header = JSON.parse(hdrTxt); } catch { return null; }
+    try { payload = JSON.parse(plTxt); } catch { return null; }
+    if (!header || typeof header !== "object") return null;
+    if (!payload || typeof payload !== "object") return null;
+    return { header, payload };
+  }
+  function smartStringHint(v) {
+    if (typeof v !== "string") return null;
+    const len = v.length;
+    if (len < 8 || len > 8192) return null;
+
+    // UUID — exact match.
+    if (len === 36 && UUID_RE.test(v)) {
+      const ver = uuidVersion(v);
+      return {
+        kind: "uuid",
+        label: ver ? `UUID v${ver}` : "UUID",
+        title: "Click to inspect",
+        decoded: v.toLowerCase(),
+        meta: ver ? `Version ${ver}` : "UUID",
+        source: v,
+      };
+    }
+
+    // JWT — three base64url segments separated by dots, both header/payload
+    // decode to JSON objects.
+    if (v.indexOf(".") !== -1 && JWT_RE.test(v)) {
+      const jwt = decodeJwt(v);
+      if (jwt) {
+        const alg = (jwt.header && (jwt.header.alg || jwt.header.typ)) || "JWT";
+        return {
+          kind: "jwt",
+          label: `JWT · ${String(alg).slice(0, 16)}`,
+          title: "Click to inspect decoded payload",
+          decoded: JSON.stringify({ header: jwt.header, payload: jwt.payload }, null, 2),
+          meta: "Signed JSON Web Token",
+          source: v,
+        };
+      }
+    }
+
+    // base64 — standard or url-safe. Must decode to UTF-8 printable text or
+    // recognised JSON. We avoid hex strings, plain ASCII words, and common
+    // tokens that happen to fit the alphabet.
+    if (len >= 16 && len <= 4096) {
+      let candidate = null;
+      if (BASE64_RE.test(v) && len % 4 === 0) candidate = v;
+      else if (BASE64URL_RE.test(v) && !/^[A-Za-z]+$/.test(v) && !/^[0-9]+$/.test(v) && v.indexOf("-") + v.indexOf("_") > -2) {
+        candidate = b64urlToB64(v);
+      }
+      if (candidate) {
+        const bin = tryAtob(candidate);
+        if (bin && bin.length >= 4) {
+          const txt = bytesToUtf8(bin);
+          if (txt && isMostlyPrintable(txt) && txt !== v) {
+            // Pretty-print if it decodes to JSON.
+            let decoded = txt;
+            try { decoded = JSON.stringify(JSON.parse(txt), null, 2); } catch { /* keep raw */ }
+            return {
+              kind: "base64",
+              label: `base64 · ${bin.length}B`,
+              title: "Click to inspect decoded text",
+              decoded,
+              meta: `${bin.length} bytes decoded`,
+              source: v,
+            };
+          }
+        }
+      }
+    }
+
+    return null;
+  }
+
+  let _jlOpenPopover = null;
+  function closeDecodedPopover() {
+    if (_jlOpenPopover && _jlOpenPopover.parentNode) _jlOpenPopover.parentNode.removeChild(_jlOpenPopover);
+    _jlOpenPopover = null;
+    document.removeEventListener("keydown", _popKey, true);
+    document.removeEventListener("mousedown", _popDoc, true);
+  }
+  function _popKey(e) { if (e.key === "Escape") { e.stopPropagation(); closeDecodedPopover(); } }
+  function _popDoc(e) { if (_jlOpenPopover && !_jlOpenPopover.contains(e.target)) closeDecodedPopover(); }
+  function openDecodedPopover(anchor, hint) {
+    closeDecodedPopover();
+    const pop = document.createElement("div");
+    pop.className = `jl-decoded-pop jl-decoded-pop-${hint.kind}`;
+    const head = document.createElement("div");
+    head.className = "jl-decoded-head";
+    const title = document.createElement("span");
+    title.className = "jl-decoded-kind";
+    title.textContent = hint.label;
+    head.appendChild(title);
+    const meta = document.createElement("span");
+    meta.className = "jl-decoded-meta";
+    meta.textContent = hint.meta || "";
+    head.appendChild(meta);
+    const btns = document.createElement("div");
+    btns.className = "jl-decoded-actions";
+    const copy = document.createElement("button");
+    copy.type = "button";
+    copy.className = "jl-decoded-btn";
+    copy.textContent = "Copy";
+    copy.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      try { await navigator.clipboard.writeText(hint.decoded); copy.textContent = "Copied"; setTimeout(() => { copy.textContent = "Copy"; }, 1100); }
+      catch { copy.textContent = "Failed"; setTimeout(() => { copy.textContent = "Copy"; }, 1100); }
+    });
+    btns.appendChild(copy);
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "jl-decoded-btn jl-decoded-close";
+    close.setAttribute("aria-label", "Close");
+    close.innerHTML = ICONS.close;
+    close.addEventListener("click", (e) => { e.stopPropagation(); closeDecodedPopover(); });
+    btns.appendChild(close);
+    head.appendChild(btns);
+    pop.appendChild(head);
+
+    const body = document.createElement("pre");
+    body.className = "jl-decoded-body";
+    body.textContent = hint.decoded;
+    pop.appendChild(body);
+
+    document.body.appendChild(pop);
+    // Position near anchor.
+    const r = anchor.getBoundingClientRect();
+    const pr = pop.getBoundingClientRect();
+    let left = r.left + window.scrollX;
+    let top  = r.bottom + window.scrollY + 6;
+    const maxLeft = window.scrollX + window.innerWidth - pr.width - 12;
+    if (left > maxLeft) left = Math.max(window.scrollX + 12, maxLeft);
+    if (top + pr.height > window.scrollY + window.innerHeight - 12) {
+      top = r.top + window.scrollY - pr.height - 6;
+    }
+    pop.style.left = `${Math.max(8, left)}px`;
+    pop.style.top  = `${Math.max(8, top)}px`;
+
+    _jlOpenPopover = pop;
+    setTimeout(() => {
+      document.addEventListener("keydown", _popKey, true);
+      document.addEventListener("mousedown", _popDoc, true);
+    }, 0);
+  }
+
   function previewPrimitive(v, keyHint) {
     const t = typeOf(v);
     const span = document.createElement("span");
@@ -308,6 +503,25 @@
         tag.setAttribute("data-kind", hint.kind);
         tag.setAttribute("aria-hidden", "true");
         tag.textContent = hint.label;
+        wrap.appendChild(tag);
+        return wrap;
+      }
+      const sHint = smartStringHint(v);
+      if (sHint) {
+        const wrap = document.createElement("span");
+        wrap.className = "jl-str-wrap";
+        wrap.appendChild(span);
+        const tag = document.createElement("button");
+        tag.type = "button";
+        tag.className = `jl-str-hint jl-str-hint-${sHint.kind}`;
+        tag.setAttribute("data-kind", sHint.kind);
+        tag.title = sHint.title || sHint.label;
+        tag.textContent = sHint.label;
+        tag.addEventListener("click", (e) => {
+          e.stopPropagation();
+          e.preventDefault();
+          openDecodedPopover(tag, sHint);
+        });
         wrap.appendChild(tag);
         return wrap;
       }
