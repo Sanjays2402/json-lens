@@ -13,7 +13,7 @@ This file is the agent's task queue. Unchecked items get implemented in order. W
 - [x] Diff two JSON URLs side-by-side
 - [x] Pretty-print + minify toggle
 - [x] Path breadcrumb on hover
-- [ ] Export filtered subtree
+- [x] Export filtered subtree
 - [ ] Performance mode for >10MB JSON (virtualized tree)
 - [ ] Liquid-glass overlay UI
 - [ ] Dark/light theme + monospace tweaks

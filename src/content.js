@@ -1130,6 +1130,10 @@
                  placeholder="Filter by path — .items[].name, ..id, .users[0]"
                  aria-label="Filter by jq-style path" />
           <span class="jl-filter-status" aria-live="polite"></span>
+          <div class="jl-filter-export" role="group" aria-label="Export filtered subtree" hidden>
+            <button class="jl-btn jl-btn-ghost jl-filter-copy" type="button" title="Copy filtered subtree" aria-label="Copy filtered subtree">${ICONS.copy}<span>Copy</span></button>
+            <button class="jl-btn jl-btn-ghost jl-filter-save" type="button" title="Download filtered subtree" aria-label="Download filtered subtree">${ICONS.download}<span>Save</span></button>
+          </div>
           <button class="jl-filter-clear" type="button" title="Clear filter" aria-label="Clear filter" hidden>${ICONS.close}</button>
         </div>
         <div class="jl-chrome-search" role="search">
@@ -1340,6 +1344,35 @@
     const filterStatus = root.querySelector(".jl-filter-status");
     const filterClear = root.querySelector(".jl-filter-clear");
     const filterRow = root.querySelector(".jl-chrome-filter");
+    const filterExport = root.querySelector(".jl-filter-export");
+    const filterCopyBtn = root.querySelector(".jl-filter-copy");
+    const filterSaveBtn = root.querySelector(".jl-filter-save");
+
+    // Collect the values matched by the current filter from the DOM. Returns
+    // a value the user would expect to export: a single value when the filter
+    // matched exactly once, otherwise an array of values in document order.
+    // Unresolvable paths are silently dropped.
+    const collectFilteredSubtree = () => {
+      const matchedNodes = Array.from(tree.querySelectorAll(".jl-node.jl-match"));
+      const values = [];
+      const paths = [];
+      for (const n of matchedNodes) {
+        const p = n.getAttribute("data-path") || "$";
+        const resolved = resolvePath(parsed, p);
+        if (resolved.ok) {
+          values.push(resolved.value);
+          paths.push(p);
+        }
+      }
+      if (values.length === 0) return { ok: false };
+      const value = values.length === 1 ? values[0] : values;
+      return { ok: true, value, paths, count: values.length };
+    };
+
+    const exportFilename = (count) => {
+      const base = (location.pathname.split("/").pop() || "document").replace(/\.json$/i, "") || "document";
+      return `${base}.filtered${count > 1 ? `.${count}` : ""}.json`;
+    };
 
     let filterTimer = 0;
     const runFilter = (value) => {
@@ -1350,18 +1383,48 @@
       if (!has) {
         clearFilterClasses(tree);
         filterStatus.textContent = "";
+        filterExport.hidden = true;
         return;
       }
       const res = applyFilter(tree, value);
       if (res.error) {
         filterRow.classList.add("jl-filter-error");
         filterStatus.textContent = res.error;
+        filterExport.hidden = true;
         return;
       }
       filterStatus.textContent = res.matches === 0
         ? "no matches"
         : `${res.matches} ${res.matches === 1 ? "match" : "matches"}`;
+      filterExport.hidden = res.matches === 0;
     };
+
+    filterCopyBtn.addEventListener("click", async () => {
+      const got = collectFilteredSubtree();
+      if (!got.ok) { flash(root, "No matches to copy"); return; }
+      const text = compact ? JSON.stringify(got.value) : JSON.stringify(got.value, null, 2);
+      try {
+        await navigator.clipboard.writeText(text);
+        flash(root, got.count === 1 ? "Copied filtered subtree" : `Copied ${got.count} matches`);
+      } catch {
+        flash(root, "Copy failed");
+      }
+    });
+    filterSaveBtn.addEventListener("click", () => {
+      const got = collectFilteredSubtree();
+      if (!got.ok) { flash(root, "No matches to save"); return; }
+      const text = compact ? JSON.stringify(got.value) : JSON.stringify(got.value, null, 2);
+      const blob = new Blob([text], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = exportFilename(got.count);
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      flash(root, got.count === 1 ? "Saved filtered subtree" : `Saved ${got.count} matches`);
+    });
 
     filterInput.addEventListener("input", () => {
       const val = filterInput.value;
