@@ -26,4 +26,4 @@ This file is the agent's task queue. Unchecked items get implemented in order. W
 - [x] Keyboard navigation (j/k/h/l vim-style) with focus ring
 - [x] Export tree as CSV for tabular arrays
 - [x] Pinned nodes sidebar (drag any node to pin for cross-reference)
-- [ ] Command palette (Cmd+K) for all extension actions
+- [x] Command palette (Cmd+K) for all extension actions

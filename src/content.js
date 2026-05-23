@@ -1886,7 +1886,7 @@
             <button class="jl-btn jl-btn-ghost" data-action="bookmarks" title="Bookmarks (B)" aria-label="Bookmarks" aria-pressed="false">${ICONS.bookmark}<span>Bookmarks</span></button>
             <button class="jl-btn jl-btn-ghost" data-action="pins" title="Pinned nodes (P) — drag any row here to pin" aria-label="Pinned nodes" aria-pressed="false">${ICONS.pin}<span>Pins</span><span class="jl-pin-count" aria-hidden="true"></span></button>
             <button class="jl-btn jl-btn-ghost" data-action="history" title="History (H)" aria-label="History timeline" aria-pressed="false">${ICONS.history}<span>History</span><span class="jl-hist-count" aria-hidden="true"></span></button>
-            <button class="jl-btn jl-btn-ghost" data-action="palette" title="Command palette (⌘⇧P)" aria-label="Command palette">${ICONS.command}<span>Actions</span></button>
+            <button class="jl-btn jl-btn-ghost" data-action="palette" title="Command palette (⌘K)" aria-label="Command palette">${ICONS.command}<span>Actions</span></button>
             <button class="jl-btn jl-btn-ghost" data-action="raw" title="Toggle raw view" aria-label="Toggle raw view">${ICONS.raw}<span>Raw</span></button>
             <div class="jl-theme-switch" role="group" aria-label="Theme">
               <button type="button" data-theme="auto" title="Auto theme" aria-label="Auto theme" aria-pressed="false">${ICONS.auto}</button>
@@ -1910,7 +1910,7 @@
         <div class="jl-chrome-search" role="search">
           <span class="jl-search-icon" aria-hidden="true">${ICONS.search}</span>
           <input class="jl-search-input" type="text" spellcheck="false" autocomplete="off"
-                 placeholder="Search keys & values — ⌘K"
+                 placeholder="Search keys & values — ⌘⇧K"
                  aria-label="Search keys and values" />
           <span class="jl-search-status" aria-live="polite"></span>
           <div class="jl-search-nav" role="group" aria-label="Search navigation">
@@ -2788,10 +2788,10 @@
       runSearch("");
       searchInput.focus();
     });
-    // ⌘K / Ctrl+K focuses search
+    // ⌘⇧K / Ctrl+⇧K focuses search (⌘K is reserved for the command palette)
     document.addEventListener("keydown", (ev) => {
       const mod = ev.metaKey || ev.ctrlKey;
-      if (mod && (ev.key === "k" || ev.key === "K")) {
+      if (mod && ev.shiftKey && (ev.key === "k" || ev.key === "K")) {
         searchInput.focus();
         searchInput.select();
         ev.preventDefault();
@@ -4076,6 +4076,9 @@
         { id: "format", label: compact ? "Pretty-print JSON" : "Minify JSON", hint: "Format", icon: compact ? ICONS.pretty : ICONS.minify, run: () => formatBtn.click() },
         { id: "copy", label: "Copy JSON to clipboard", hint: "Clipboard", icon: ICONS.copy, run: () => root.querySelector('[data-action="copy"]').click() },
         { id: "download", label: "Download JSON", hint: "File", icon: ICONS.download, run: () => root.querySelector('[data-action="download"]').click() },
+        ...(curlBtn && !curlBtn.disabled ? [
+          { id: "copy-curl-patch", label: "Copy edits as cURL PATCH", hint: "Clipboard", icon: ICONS.patch, run: () => curlBtn.click() },
+        ] : []),
         { id: "schema", label: "Toggle inferred schema panel", hint: "Panel", icon: ICONS.schema, run: () => root.querySelector('[data-action="schema"]').click() },
         { id: "diff", label: "Toggle diff against another URL", hint: "Panel", icon: ICONS.diff, run: () => root.querySelector('[data-action="diff"]').click() },
         { id: "jsonpath", label: "Toggle JSONPath evaluator panel", hint: "Panel", icon: ICONS.jsonpath, run: () => root.querySelector('[data-action="jsonpath"]').click() },
@@ -4087,7 +4090,7 @@
         { id: "history", label: "Toggle history timeline", hint: "H", icon: ICONS.history, run: () => root.querySelector('[data-action="history"]').click() },
         { id: "history-clear", label: "Clear history for this URL", hint: "History", icon: ICONS.trash, run: () => { setHistoryOpen(true); clearHistoryForCurrent(); } },
         { id: "raw", label: inRaw ? "Show interactive tree" : "Show raw JSON text", hint: "View", icon: ICONS.raw, run: () => root.querySelector('[data-action="raw"]').click() },
-        { id: "focus-search", label: "Focus search bar", hint: "⌘K", icon: ICONS.search, run: () => { setPaletteOpen(false); searchInput.focus(); searchInput.select(); } },
+        { id: "focus-search", label: "Focus search bar", hint: "⌘⇧K", icon: ICONS.search, run: () => { setPaletteOpen(false); searchInput.focus(); searchInput.select(); } },
         { id: "focus-filter", label: "Focus jq-style path filter", hint: "/", icon: ICONS.filter, run: () => { setPaletteOpen(false); filterInput.focus(); filterInput.select(); } },
         ...(isTabularArray(parsed) ? [
           { id: "export-csv", label: "Download root array as CSV", hint: "Export", icon: ICONS.csv, run: () => {
@@ -4210,9 +4213,17 @@
       const idx = Number(item.getAttribute("data-idx"));
       if (!Number.isNaN(idx)) setPaletteActive(idx);
     });
+    // ⌘K / Ctrl+K is the primary command-palette shortcut; ⌘⇧P kept as an alias for parity with editor conventions.
     document.addEventListener("keydown", (ev) => {
       const mod = ev.metaKey || ev.ctrlKey;
-      if (mod && ev.shiftKey && (ev.key === "p" || ev.key === "P")) {
+      const isK = !ev.shiftKey && !ev.altKey && (ev.key === "k" || ev.key === "K");
+      const isShiftP = ev.shiftKey && (ev.key === "p" || ev.key === "P");
+      if (mod && (isK || isShiftP)) {
+        // Don't hijack when the user is typing inside a JSON Lens input/textarea — let them keep editing.
+        const t = ev.target;
+        const insideEditable = t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || (t.isContentEditable === true));
+        const insideLens = !!(t && t.closest && t.closest(".jl-root"));
+        if (insideEditable && insideLens && !palette.hidden) return; // already inside palette input
         ev.preventDefault();
         setPaletteOpen(palette.hidden);
       } else if (!palette.hidden && ev.key === "Escape") {
