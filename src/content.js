@@ -579,6 +579,7 @@
     terminal: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 10l3 2-3 2"/><path d="M13 14h4"/></svg>`,
     history: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 7v5l3.5 2"/></svg>`,
     diffArrow: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/></svg>`,
+    csv: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M3.5 9.5h17"/><path d="M3.5 14.5h17"/><path d="M9 9.5v10"/><path d="M15 9.5v10"/></svg>`,
   };
 
   // ---------- history (snapshots per URL) ----------
@@ -930,6 +931,63 @@
 
   // Expose for testing/debugging.
   ns.generateTSInterface = generateTSInterface;
+
+  // ---------- CSV generation (tabular arrays) ----------
+  // A value is "tabular" when it is a non-empty array whose elements are
+  // plain objects (not arrays). Nested objects/arrays inside cells are
+  // stringified as JSON so the row stays a single CSV record. Column order
+  // is the union of keys in first-appearance order across sampled rows.
+  const CSV_SAMPLE = 5000;
+  function isTabularArray(value) {
+    if (!Array.isArray(value) || value.length === 0) return false;
+    let objCount = 0;
+    const limit = Math.min(value.length, 50);
+    for (let i = 0; i < limit; i++) {
+      const v = value[i];
+      if (v && typeof v === "object" && !Array.isArray(v)) objCount++;
+    }
+    // At least half the sampled rows must be plain objects to call it tabular.
+    return objCount >= Math.max(1, Math.ceil(limit / 2));
+  }
+  function csvCell(v) {
+    if (v === null || v === undefined) return "";
+    let s;
+    if (typeof v === "string") s = v;
+    else if (typeof v === "number" || typeof v === "boolean") s = String(v);
+    else { try { s = JSON.stringify(v); } catch { s = String(v); } }
+    // Quote when the cell contains a comma, quote, CR or LF; double inner quotes.
+    if (/[",\r\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+    return s;
+  }
+  function generateCSV(value) {
+    if (!Array.isArray(value)) return "";
+    const rows = value.slice(0, CSV_SAMPLE);
+    const cols = [];
+    const seen = new Set();
+    for (const row of rows) {
+      if (row && typeof row === "object" && !Array.isArray(row)) {
+        for (const k of Object.keys(row)) {
+          if (!seen.has(k)) { seen.add(k); cols.push(k); }
+        }
+      }
+    }
+    if (cols.length === 0) return "";
+    const lines = [cols.map(csvCell).join(",")];
+    for (const row of rows) {
+      if (row && typeof row === "object" && !Array.isArray(row)) {
+        lines.push(cols.map((c) => csvCell(row[c])).join(","));
+      } else {
+        // Non-object row: place its stringified value in the first column.
+        const cells = new Array(cols.length).fill("");
+        cells[0] = csvCell(row);
+        lines.push(cells.join(","));
+      }
+    }
+    // CRLF line endings per RFC 4180.
+    return lines.join("\r\n") + "\r\n";
+  }
+  ns.isTabularArray = isTabularArray;
+  ns.generateCSV = generateCSV;
 
   // ---------- JSON Schema generation ----------
   // Walks the value and emits a draft-07 JSON Schema. Arrays of objects
@@ -1339,6 +1397,16 @@
       jsBtn.setAttribute("aria-label", "Copy as JSON Schema");
       jsBtn.innerHTML = `${ICONS.jsonSchema}<span class="jl-row-action-label">Schema</span>`;
       actions.appendChild(jsBtn);
+      if (isTabularArray(value)) {
+        const csvBtn = document.createElement("button");
+        csvBtn.type = "button";
+        csvBtn.className = "jl-row-action jl-row-action-csv";
+        csvBtn.setAttribute("data-action", "copy-csv");
+        csvBtn.setAttribute("title", "Copy as CSV");
+        csvBtn.setAttribute("aria-label", "Copy as CSV");
+        csvBtn.innerHTML = `${ICONS.csv}<span class="jl-row-action-label">CSV</span>`;
+        actions.appendChild(csvBtn);
+      }
     } else if (pathStr && pathStr !== "$") {
       // Only editable when this primitive sits under a parent we can address.
       const editBtn = document.createElement("button");
@@ -2205,6 +2273,20 @@
             try {
               await navigator.clipboard.writeText(src);
               flash(root, `Copied ${name} as TS`);
+            } catch {
+              flash(root, "Copy failed");
+            }
+          })();
+        } else if (action === "copy-csv") {
+          const resolved = resolvePath(parsed, pathStr);
+          if (!resolved.ok) { flash(root, "Copy failed"); return; }
+          const src = generateCSV(resolved.value);
+          if (!src) { flash(root, "Not tabular"); return; }
+          const rowCount = Math.min(resolved.value.length, CSV_SAMPLE);
+          (async () => {
+            try {
+              await navigator.clipboard.writeText(src);
+              flash(root, `Copied ${rowCount} ${rowCount === 1 ? "row" : "rows"} as CSV`);
             } catch {
               flash(root, "Copy failed");
             }
@@ -3955,6 +4037,26 @@
         { id: "raw", label: inRaw ? "Show interactive tree" : "Show raw JSON text", hint: "View", icon: ICONS.raw, run: () => root.querySelector('[data-action="raw"]').click() },
         { id: "focus-search", label: "Focus search bar", hint: "⌘K", icon: ICONS.search, run: () => { setPaletteOpen(false); searchInput.focus(); searchInput.select(); } },
         { id: "focus-filter", label: "Focus jq-style path filter", hint: "/", icon: ICONS.filter, run: () => { setPaletteOpen(false); filterInput.focus(); filterInput.select(); } },
+        ...(isTabularArray(parsed) ? [
+          { id: "export-csv", label: "Download root array as CSV", hint: "Export", icon: ICONS.csv, run: () => {
+            const src = generateCSV(parsed);
+            if (!src) { flash(root, "Not tabular"); return; }
+            const blob = new Blob([src], { type: "text/csv;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            const base = (location.pathname.split("/").pop() || "document").replace(/\.json$/i, "") || "document";
+            a.href = url; a.download = `${base}.csv`;
+            document.body.appendChild(a); a.click(); a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+            flash(root, "Saved CSV");
+          } },
+          { id: "export-csv-copy", label: "Copy root array as CSV", hint: "Export", icon: ICONS.csv, run: async () => {
+            const src = generateCSV(parsed);
+            if (!src) { flash(root, "Not tabular"); return; }
+            try { await navigator.clipboard.writeText(src); flash(root, "Copied CSV"); }
+            catch { flash(root, "Copy failed"); }
+          } },
+        ] : []),
       ];
     }
 
