@@ -274,6 +274,9 @@
     pencil: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4l10-10-4-4L4 16z"/><path d="M14 6l4 4"/></svg>`,
     jsonpath: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h3a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2H4"/><path d="M20 6h-3a2 2 0 0 0-2 2v2a2 2 0 0 0 2 2h3"/><path d="M9 14l2 4 2-8 2 4"/></svg>`,
     play: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 5v14l11-7z"/></svg>`,
+    undo: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 6 6v0a6 6 0 0 1-6 6h-3"/></svg>`,
+    patch: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7l8-3 8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9z"/><path d="M9 12l2 2 4-4"/></svg>`,
+    terminal: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 10l3 2-3 2"/><path d="M13 14h4"/></svg>`,
   };
 
   // ---------- bookmarks ----------
@@ -924,10 +927,12 @@
       row.appendChild(trailing);
     }
 
-    // Per-row actions (hover-revealed). Only useful on containers right now.
+    // Per-row actions (hover-revealed). Containers get TS/Schema copy; primitives
+    // get inline editing with revert. Edits never leave the page — see EDITS map
+    // and the copy-as-curl-PATCH action in the chrome.
+    const actions = document.createElement("span");
+    actions.className = "jl-row-actions";
     if (isContainer) {
-      const actions = document.createElement("span");
-      actions.className = "jl-row-actions";
       const tsBtn = document.createElement("button");
       tsBtn.type = "button";
       tsBtn.className = "jl-row-action jl-row-action-ts";
@@ -944,8 +949,26 @@
       jsBtn.setAttribute("aria-label", "Copy as JSON Schema");
       jsBtn.innerHTML = `${ICONS.jsonSchema}<span class="jl-row-action-label">Schema</span>`;
       actions.appendChild(jsBtn);
-      row.appendChild(actions);
+    } else if (pathStr && pathStr !== "$") {
+      // Only editable when this primitive sits under a parent we can address.
+      const editBtn = document.createElement("button");
+      editBtn.type = "button";
+      editBtn.className = "jl-row-action jl-row-action-edit";
+      editBtn.setAttribute("data-action", "edit-value");
+      editBtn.setAttribute("title", "Edit value");
+      editBtn.setAttribute("aria-label", "Edit value");
+      editBtn.innerHTML = `${ICONS.pencil}<span class="jl-row-action-label">Edit</span>`;
+      actions.appendChild(editBtn);
+      const revBtn = document.createElement("button");
+      revBtn.type = "button";
+      revBtn.className = "jl-row-action jl-row-action-revert";
+      revBtn.setAttribute("data-action", "revert-value");
+      revBtn.setAttribute("title", "Revert to original");
+      revBtn.setAttribute("aria-label", "Revert to original");
+      revBtn.innerHTML = `${ICONS.undo}<span class="jl-row-action-label">Revert</span>`;
+      actions.appendChild(revBtn);
     }
+    if (actions.childElementCount) row.appendChild(actions);
 
     node.appendChild(row);
 
@@ -1016,6 +1039,52 @@
     }
     if (consumed !== pathStr.length) return { ok: false };
     return { ok: true, value: cur };
+  }
+
+  // Convert a JSON Lens path ($.a[0]["b"]) into an RFC6901 JSON Pointer. The
+  // root path becomes the empty string — standard JSON Pointer for the document.
+  function pathToPointer(pathStr) {
+    if (!pathStr || pathStr === "$") return "";
+    let out = "";
+    let consumed = 1;
+    PATH_TOKEN_RE.lastIndex = consumed;
+    let m;
+    while ((m = PATH_TOKEN_RE.exec(pathStr)) !== null) {
+      if (m.index !== consumed) return out;
+      consumed = PATH_TOKEN_RE.lastIndex;
+      let seg;
+      if (m[1] !== undefined) seg = m[1];
+      else if (m[2] !== undefined) seg = m[2];
+      else seg = m[3].replace(/\\"/g, '"').replace(/\\\\/g, "\\");
+      out += "/" + seg.replace(/~/g, "~0").replace(/\//g, "~1");
+    }
+    return out;
+  }
+
+  // Resolve up to (but not including) the last segment of a path. Returns the
+  // parent container and the last key/index when the path is two or more
+  // segments deep. Used by inline edits which mutate a value in place.
+  function resolveParent(root, pathStr) {
+    if (!pathStr || pathStr === "$") return { ok: false };
+    const tokens = [];
+    let consumed = 1;
+    PATH_TOKEN_RE.lastIndex = consumed;
+    let m;
+    while ((m = PATH_TOKEN_RE.exec(pathStr)) !== null) {
+      if (m.index !== consumed) return { ok: false };
+      consumed = PATH_TOKEN_RE.lastIndex;
+      if (m[1] !== undefined) tokens.push({ key: m[1] });
+      else if (m[2] !== undefined) tokens.push({ key: Number(m[2]) });
+      else tokens.push({ key: m[3].replace(/\\"/g, '"').replace(/\\\\/g, "\\") });
+    }
+    if (consumed !== pathStr.length || tokens.length === 0) return { ok: false };
+    let cur = root;
+    for (let i = 0; i < tokens.length - 1; i++) {
+      if (cur === null || typeof cur !== "object") return { ok: false };
+      cur = cur[tokens[i].key];
+    }
+    if (cur === null || typeof cur !== "object") return { ok: false };
+    return { ok: true, parent: cur, last: tokens[tokens.length - 1].key };
   }
 
   // Derive a PascalCase interface name from a path string + the value's shape.
@@ -1335,6 +1404,7 @@
             <button class="jl-btn jl-btn-ghost" data-action="format" title="Toggle pretty / minify" aria-label="Toggle pretty or minify" aria-pressed="false"><span class="jl-format-icon">${ICONS.pretty}</span><span class="jl-format-label">Pretty</span></button>
             <button class="jl-btn" data-action="copy" title="Copy JSON" aria-label="Copy JSON">${ICONS.copy}<span>Copy</span></button>
             <button class="jl-btn" data-action="download" title="Download JSON" aria-label="Download JSON">${ICONS.download}<span>Save</span></button>
+            <button class="jl-btn jl-btn-ghost jl-btn-curl" data-action="copy-curl-patch" title="Copy edits as curl PATCH" aria-label="Copy edits as curl PATCH" disabled aria-disabled="true">${ICONS.patch}<span>cURL PATCH</span><span class="jl-curl-count" aria-hidden="true"></span></button>
             <button class="jl-btn jl-btn-ghost" data-action="schema" title="Inferred schema" aria-label="Inferred schema" aria-pressed="false">${ICONS.schema}<span>Schema</span></button>
             <button class="jl-btn jl-btn-ghost" data-action="diff" title="Diff against another JSON URL" aria-label="Diff against another JSON URL" aria-pressed="false">${ICONS.diff}<span>Diff</span></button>
             <button class="jl-btn jl-btn-ghost" data-action="jsonpath" title="JSONPath evaluator" aria-label="JSONPath evaluator" aria-pressed="false">${ICONS.jsonpath}<span>JSONPath</span></button>
@@ -1544,7 +1614,147 @@
     const tree = buildTree(parsed);
     treeHost.appendChild(tree);
 
-    // tree click delegation
+    // Inline edits: track per-path original + current values so a row can be
+            // reverted and the set can be exported as a JSON Patch / curl command.
+            const EDITS = new Map(); // pathStr -> { original, current }
+
+            function refreshEditsBtn() {
+              const btn = root.querySelector('[data-action="copy-curl-patch"]');
+              if (!btn) return;
+              const n = EDITS.size;
+              const label = btn.querySelector('.jl-curl-count');
+              if (label) label.textContent = n ? String(n) : "";
+              btn.classList.toggle("jl-has-edits", n > 0);
+              btn.disabled = n === 0;
+              btn.setAttribute("aria-disabled", String(n === 0));
+            }
+
+            function rerenderPreview(node, value) {
+              const row = node.querySelector(":scope > .jl-row");
+              if (!row) return;
+              const preview = row.querySelector(".jl-preview");
+              if (!preview) return;
+              preview.innerHTML = "";
+              preview.appendChild(previewPrimitive(value));
+            }
+
+            function applyEdit(node, pathStr, newValue) {
+              const parent = resolveParent(parsed, pathStr);
+              if (!parent.ok) { flash(root, "Edit failed"); return false; }
+              const original = EDITS.has(pathStr) ? EDITS.get(pathStr).original : parent.parent[parent.last];
+              parent.parent[parent.last] = newValue;
+              if (Object.is(original, newValue)) {
+                EDITS.delete(pathStr);
+                node.classList.remove("jl-edited");
+              } else {
+                EDITS.set(pathStr, { original, current: newValue });
+                node.classList.add("jl-edited");
+              }
+              rerenderPreview(node, newValue);
+              refreshEditsBtn();
+              return true;
+            }
+
+            function startEdit(node, pathStr) {
+              if (node.classList.contains("jl-editing")) return;
+              const row = node.querySelector(":scope > .jl-row");
+              if (!row) return;
+              const preview = row.querySelector(".jl-preview");
+              if (!preview) return;
+              const t = node.getAttribute("data-type");
+              const parent = resolveParent(parsed, pathStr);
+              if (!parent.ok) { flash(root, "Cannot edit root"); return; }
+              const current = parent.parent[parent.last];
+              node.classList.add("jl-editing");
+              const editor = document.createElement("span");
+              editor.className = "jl-edit-shell";
+              const input = document.createElement("input");
+              input.type = "text";
+              input.className = "jl-edit-input";
+              input.spellcheck = false;
+              input.autocomplete = "off";
+              // Pre-fill with a JSON literal so users see the type they're editing.
+              input.value = t === "string" ? JSON.stringify(current) : (current === null ? "null" : String(current));
+              const hint = document.createElement("span");
+              hint.className = "jl-edit-hint";
+              hint.textContent = "⏎ save · esc cancel · JSON literal";
+              const err = document.createElement("span");
+              err.className = "jl-edit-err";
+              editor.appendChild(input);
+              editor.appendChild(hint);
+              editor.appendChild(err);
+              preview.style.display = "none";
+              row.insertBefore(editor, preview.nextSibling);
+              input.focus();
+              input.select();
+              const finish = () => {
+                node.classList.remove("jl-editing");
+                editor.remove();
+                preview.style.display = "";
+              };
+              input.addEventListener("keydown", (ev) => {
+                if (ev.key === "Escape") { ev.preventDefault(); finish(); return; }
+                if (ev.key === "Enter") {
+                  ev.preventDefault();
+                  const raw = input.value.trim();
+                  let parsedVal;
+                  try { parsedVal = JSON.parse(raw); }
+                  catch (e) { err.textContent = "Invalid JSON literal"; input.classList.add("jl-edit-bad"); return; }
+                  const newType = typeOf(parsedVal);
+                  if (newType === "object" || newType === "array") {
+                    err.textContent = "Use container nodes for objects / arrays";
+                    input.classList.add("jl-edit-bad");
+                    return;
+                  }
+                  if (!applyEdit(node, pathStr, parsedVal)) { err.textContent = "Apply failed"; return; }
+                  // Re-stamp type badge in case the literal changed type.
+                  node.setAttribute("data-type", newType);
+                  const badge = row.querySelector(".jl-type");
+                  if (badge) { badge.setAttribute("data-type", newType); badge.textContent = newType; }
+                  flash(root, "Edited " + pathStr);
+                  finish();
+                }
+              });
+              input.addEventListener("blur", () => {
+                // Defer so an Enter handler runs first.
+                setTimeout(() => { if (document.body.contains(editor)) finish(); }, 0);
+              });
+            }
+
+            function revertEdit(node, pathStr) {
+              if (!EDITS.has(pathStr)) { flash(root, "Not edited"); return; }
+              const { original } = EDITS.get(pathStr);
+              const parent = resolveParent(parsed, pathStr);
+              if (!parent.ok) return;
+              parent.parent[parent.last] = original;
+              EDITS.delete(pathStr);
+              node.classList.remove("jl-edited");
+              const newType = typeOf(original);
+              node.setAttribute("data-type", newType);
+              const badge = node.querySelector(":scope > .jl-row .jl-type");
+              if (badge) { badge.setAttribute("data-type", newType); badge.textContent = newType; }
+              rerenderPreview(node, original);
+              refreshEditsBtn();
+              flash(root, "Reverted " + pathStr);
+            }
+
+            function buildCurlPatch() {
+              if (EDITS.size === 0) return "";
+              const ops = [];
+              for (const [p, { current }] of EDITS) {
+                ops.push({ op: "replace", path: pathToPointer(p), value: current });
+              }
+              const body = JSON.stringify(ops);
+              // Escape single quotes for shell-safe interpolation inside '...'.
+              const safe = body.replace(/'/g, "'\\''");
+              const url = location.href.replace(/'/g, "'\\''");
+              return [
+                "curl -X PATCH '" + url + "' \\",
+                "  -H 'Content-Type: application/json-patch+json' \\",
+                "  -d '" + safe + "'",
+              ].join("\n");
+            }
+
     tree.addEventListener("click", (ev) => {
       const target = ev.target;
       if (!(target instanceof Element)) return;
@@ -1582,6 +1792,10 @@
               flash(root, "Copy failed");
             }
           })();
+        } else if (action === "edit-value") {
+          startEdit(node, pathStr);
+        } else if (action === "revert-value") {
+          revertEdit(node, pathStr);
         }
         return;
       }
@@ -1662,6 +1876,20 @@
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     });
+    const curlBtn = root.querySelector('[data-action="copy-curl-patch"]');
+    if (curlBtn) {
+      curlBtn.addEventListener("click", async () => {
+        if (EDITS.size === 0) { flash(root, "No edits to PATCH"); return; }
+        const cmd = buildCurlPatch();
+        try {
+          await navigator.clipboard.writeText(cmd);
+          flash(root, `Copied curl PATCH (${EDITS.size})`);
+        } catch {
+          flash(root, "Copy failed");
+        }
+      });
+    }
+    refreshEditsBtn();
     root.querySelector('[data-action="expand"]').addEventListener("click", () => {
       setAllCollapsed(tree, false);
       flash(root, "Expanded");

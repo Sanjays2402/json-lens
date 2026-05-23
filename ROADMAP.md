@@ -19,7 +19,7 @@ This file is the agent's task queue. Unchecked items get implemented in order. W
 - [x] Dark/light theme + monospace tweaks
 - [x] Bookmark frequently-visited JSON endpoints with named tags
 - [x] JSONPath expression evaluator panel (alternative to jq syntax)
-- [ ] Inline value editing with revert + copy-as-curl PATCH
+- [x] Inline value editing with revert + copy-as-curl PATCH
 - [ ] History timeline of JSON snapshots per URL (last 20)
 - [ ] Smart number formatting (thousands separators, byte units, timestamps)
 - [ ] Detect and render embedded base64/JWT/UUID with decoded preview
