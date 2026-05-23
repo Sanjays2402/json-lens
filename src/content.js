@@ -627,6 +627,9 @@
     pin: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3l7 7-3 1-4 4 1 4-3-1-5 5-1-4-4-1 5-5-1-3 4-4z"/></svg>`,
     pinFilled: `<svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"><path d="M14 3l7 7-3 1-4 4 1 4-3-1-5 5-1-4-4-1 5-5-1-3 4-4z"/></svg>`,
     grip: `<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><circle cx="9" cy="6" r="1.4"/><circle cx="15" cy="6" r="1.4"/><circle cx="9" cy="12" r="1.4"/><circle cx="15" cy="12" r="1.4"/><circle cx="9" cy="18" r="1.4"/><circle cx="15" cy="18" r="1.4"/></svg>`,
+    note: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h10l4 4v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z"/><path d="M15 4v4h4"/><path d="M8 13h8"/><path d="M8 17h5"/></svg>`,
+    noteFilled: `<svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1" stroke-linejoin="round"><path d="M5 4h10l4 4v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z" opacity="0.92"/><path d="M15 4v4h4" fill="none" stroke="none"/><path d="M8 13h8M8 17h5" stroke="#0b0b10" stroke-width="1.6" stroke-linecap="round"/></svg>`,
+    save: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg>`,
   };
 
   // ---------- history (snapshots per URL) ----------
@@ -1439,6 +1442,14 @@
       pinBtn.setAttribute("draggable", "true");
       pinBtn.innerHTML = `${ICONS.pin}<span class="jl-row-action-label">Pin</span>`;
       actions.appendChild(pinBtn);
+      const noteBtn = document.createElement("button");
+      noteBtn.type = "button";
+      noteBtn.className = "jl-row-action jl-row-action-note";
+      noteBtn.setAttribute("data-action", "toggle-note");
+      noteBtn.setAttribute("title", "Add a note");
+      noteBtn.setAttribute("aria-label", "Add a note to this node");
+      noteBtn.innerHTML = `${ICONS.note}<span class="jl-row-action-label">Note</span>`;
+      actions.appendChild(noteBtn);
     }
     if (isContainer) {
       const tsBtn = document.createElement("button");
@@ -2556,6 +2567,8 @@
           revertEdit(node, pathStr);
         } else if (action === "toggle-pin") {
           togglePin(pathStr);
+        } else if (action === "toggle-note") {
+          openNoteEditor(node, pathStr);
         }
         return;
       }
@@ -5046,6 +5059,262 @@
     } catch {}
 
     loadPinsForCurrent();
+
+    // ---------- annotations (per-path notes, persisted per URL) ----------
+    // Stored in chrome.storage.local under ANNOTATIONS_KEY. Shape:
+    //   { [url]: { [pathStr]: { text, updatedAt } } }
+    // Notes ride alongside pins/history — they survive reloads and never leave
+    // the user's machine. A small badge on each annotated row reveals the note
+    // inline; a popover editor handles edits/deletes.
+    const ANNOTATIONS_KEY = "json-lens:annotations";
+    const ANNOTATION_MAX_LEN = 2000;
+    const ANNOTATIONS_MAX_URLS = 200;
+    /** @type {Map<string, { text: string, updatedAt: number }>} */
+    const annotations = new Map();
+
+    function annotationsStorage() {
+      try { return chrome && chrome.storage && chrome.storage.local ? chrome.storage.local : null; }
+      catch { return null; }
+    }
+    function loadAnnotationsAll() {
+      return new Promise((resolve) => {
+        const s = annotationsStorage();
+        if (!s) { resolve({}); return; }
+        try {
+          s.get(ANNOTATIONS_KEY, (obj) => {
+            if (chrome.runtime && chrome.runtime.lastError) { resolve({}); return; }
+            const v = obj && obj[ANNOTATIONS_KEY];
+            resolve(v && typeof v === "object" ? v : {});
+          });
+        } catch { resolve({}); }
+      });
+    }
+    function saveAnnotationsAll(map) {
+      return new Promise((resolve) => {
+        const s = annotationsStorage();
+        if (!s) { resolve(false); return; }
+        try { s.set({ [ANNOTATIONS_KEY]: map }, () => resolve(!(chrome.runtime && chrome.runtime.lastError))); }
+        catch { resolve(false); }
+      });
+    }
+    async function loadAnnotationsForCurrent() {
+      const map = await loadAnnotationsAll();
+      const bucket = map[location.href];
+      annotations.clear();
+      if (bucket && typeof bucket === "object") {
+        for (const [p, v] of Object.entries(bucket)) {
+          if (!v || typeof v !== "object") continue;
+          const text = typeof v.text === "string" ? v.text : "";
+          if (!text) continue;
+          annotations.set(p, { text: text.slice(0, ANNOTATION_MAX_LEN), updatedAt: Number(v.updatedAt) || 0 });
+        }
+      }
+      refreshAllNoteIcons();
+    }
+    async function persistAnnotations() {
+      const map = await loadAnnotationsAll();
+      if (annotations.size) {
+        const bucket = {};
+        for (const [p, v] of annotations) bucket[p] = { text: v.text, updatedAt: v.updatedAt };
+        map[location.href] = bucket;
+      } else {
+        delete map[location.href];
+      }
+      const keys = Object.keys(map);
+      if (keys.length > ANNOTATIONS_MAX_URLS) {
+        keys.map((k) => {
+          const e = Object.values(map[k] || {});
+          const t = e.length ? Math.max(...e.map((x) => Number(x.updatedAt) || 0)) : 0;
+          return { k, t };
+        }).sort((a, b) => a.t - b.t)
+          .slice(0, keys.length - ANNOTATIONS_MAX_URLS)
+          .forEach(({ k }) => { delete map[k]; });
+      }
+      await saveAnnotationsAll(map);
+    }
+
+    function refreshNoteIcon(pathStr) {
+      const node = tree.querySelector(`.jl-node[data-path="${cssEscape(pathStr)}"]`);
+      if (!node) return;
+      const btn = node.querySelector(':scope > .jl-row > .jl-row-actions > .jl-row-action-note');
+      if (!btn) return;
+      const has = annotations.has(pathStr);
+      btn.innerHTML = `${has ? ICONS.noteFilled : ICONS.note}<span class="jl-row-action-label">${has ? "Note" : "Note"}</span>`;
+      btn.classList.toggle("jl-row-action-note-on", has);
+      btn.setAttribute("title", has ? "Edit note" : "Add a note");
+      btn.setAttribute("aria-pressed", String(has));
+      node.classList.toggle("jl-node-annotated", has);
+      ensureNoteBadge(node, pathStr);
+    }
+    function refreshAllNoteIcons() {
+      tree.querySelectorAll(".jl-node-annotated").forEach((n) => n.classList.remove("jl-node-annotated"));
+      tree.querySelectorAll(".jl-note-badge").forEach((b) => b.remove());
+      tree.querySelectorAll(".jl-row-action-note").forEach((btn) => {
+        const node = btn.closest(".jl-node");
+        if (!node) return;
+        const p = node.getAttribute("data-path") || "";
+        const has = annotations.has(p);
+        if (has) node.classList.add("jl-node-annotated");
+        btn.innerHTML = `${has ? ICONS.noteFilled : ICONS.note}<span class="jl-row-action-label">Note</span>`;
+        btn.classList.toggle("jl-row-action-note-on", has);
+        btn.setAttribute("title", has ? "Edit note" : "Add a note");
+        btn.setAttribute("aria-pressed", String(has));
+        if (has) ensureNoteBadge(node, p);
+      });
+    }
+
+    function ensureNoteBadge(node, pathStr) {
+      const ann = annotations.get(pathStr);
+      const row = node.querySelector(":scope > .jl-row");
+      if (!row) return;
+      let badge = row.querySelector(":scope > .jl-note-badge");
+      if (!ann) { if (badge) badge.remove(); return; }
+      if (!badge) {
+        badge = document.createElement("button");
+        badge.type = "button";
+        badge.className = "jl-note-badge";
+        badge.setAttribute("aria-label", "Show or edit note");
+        // Append at end so it sits after actions/trailing punctuation.
+        row.appendChild(badge);
+      }
+      const summary = ann.text.split(/\r?\n/)[0].slice(0, 120);
+      badge.innerHTML = `${ICONS.note}<span class="jl-note-badge-text">${escapeHTML(summary)}</span>`;
+      badge.setAttribute("title", ann.text.length > summary.length ? ann.text : summary);
+    }
+
+    // Single shared popover editor lives at the root.
+    const noteEditor = document.createElement("div");
+    noteEditor.className = "jl-note-editor";
+    noteEditor.hidden = true;
+    noteEditor.setAttribute("role", "dialog");
+    noteEditor.setAttribute("aria-modal", "false");
+    noteEditor.setAttribute("aria-label", "Edit note");
+    noteEditor.innerHTML = `
+      <div class="jl-note-editor-head">
+        <span class="jl-note-editor-icon" aria-hidden="true">${ICONS.note}</span>
+        <code class="jl-note-editor-path"></code>
+        <button type="button" class="jl-icon-btn jl-note-editor-close" title="Close (Esc)" aria-label="Close note editor">${ICONS.close}</button>
+      </div>
+      <textarea class="jl-note-editor-text" rows="4" maxlength="${ANNOTATION_MAX_LEN}" placeholder="Add a note — visible only to you, saved with this URL." aria-label="Note text"></textarea>
+      <div class="jl-note-editor-foot">
+        <span class="jl-note-editor-meta" aria-live="polite"></span>
+        <span class="jl-note-editor-actions">
+          <button type="button" class="jl-btn jl-btn-ghost jl-note-editor-delete" title="Delete note" aria-label="Delete note">${ICONS.trash}<span>Delete</span></button>
+          <button type="button" class="jl-btn jl-note-editor-save" title="Save note (⌘⏎)" aria-label="Save note">${ICONS.save}<span>Save</span></button>
+        </span>
+      </div>`;
+    root.appendChild(noteEditor);
+    const noteEditorPath = noteEditor.querySelector(".jl-note-editor-path");
+    const noteEditorText = noteEditor.querySelector(".jl-note-editor-text");
+    const noteEditorMeta = noteEditor.querySelector(".jl-note-editor-meta");
+    const noteEditorDelete = noteEditor.querySelector(".jl-note-editor-delete");
+    const noteEditorSave = noteEditor.querySelector(".jl-note-editor-save");
+    const noteEditorClose = noteEditor.querySelector(".jl-note-editor-close");
+    let noteEditorActivePath = "";
+
+    function positionNoteEditor(anchor) {
+      noteEditor.hidden = false;
+      const r = anchor.getBoundingClientRect();
+      const w = noteEditor.offsetWidth || 360;
+      const h = noteEditor.offsetHeight || 200;
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      let left = Math.min(Math.max(8, r.left), vw - w - 8);
+      let top = r.bottom + 8;
+      if (top + h > vh - 8) top = Math.max(8, r.top - h - 8);
+      noteEditor.style.left = `${left}px`;
+      noteEditor.style.top = `${top}px`;
+    }
+
+    function openNoteEditor(node, pathStr) {
+      if (!pathStr) return;
+      noteEditorActivePath = pathStr;
+      const existing = annotations.get(pathStr);
+      noteEditorPath.textContent = pathStr;
+      noteEditorPath.title = pathStr;
+      noteEditorText.value = existing ? existing.text : "";
+      noteEditorDelete.disabled = !existing;
+      noteEditorMeta.textContent = existing
+        ? `Updated ${relativeTime(existing.updatedAt)} · ${noteEditorText.value.length}/${ANNOTATION_MAX_LEN}`
+        : `${noteEditorText.value.length}/${ANNOTATION_MAX_LEN}`;
+      // Anchor to the row's note action button when available.
+      const anchor = node.querySelector(":scope > .jl-row .jl-row-action-note") || node.querySelector(":scope > .jl-row") || node;
+      positionNoteEditor(anchor);
+      requestAnimationFrame(() => {
+        try { noteEditorText.focus(); noteEditorText.setSelectionRange(noteEditorText.value.length, noteEditorText.value.length); } catch {}
+      });
+    }
+    function closeNoteEditor() {
+      noteEditor.hidden = true;
+      noteEditorActivePath = "";
+    }
+    async function saveNoteFromEditor() {
+      const path = noteEditorActivePath;
+      if (!path) return;
+      const text = noteEditorText.value.trim().slice(0, ANNOTATION_MAX_LEN);
+      if (!text) { await deleteNoteFromEditor(); return; }
+      annotations.set(path, { text, updatedAt: Date.now() });
+      refreshNoteIcon(path);
+      flash(root, "Note saved");
+      closeNoteEditor();
+      persistAnnotations();
+    }
+    async function deleteNoteFromEditor() {
+      const path = noteEditorActivePath;
+      if (!path) return;
+      if (annotations.has(path)) {
+        annotations.delete(path);
+        refreshNoteIcon(path);
+        flash(root, "Note removed");
+        persistAnnotations();
+      }
+      closeNoteEditor();
+    }
+
+    noteEditorText.addEventListener("input", () => {
+      const n = noteEditorText.value.length;
+      const existing = annotations.get(noteEditorActivePath);
+      noteEditorMeta.textContent = existing
+        ? `Updated ${relativeTime(existing.updatedAt)} · ${n}/${ANNOTATION_MAX_LEN}`
+        : `${n}/${ANNOTATION_MAX_LEN}`;
+    });
+    noteEditorText.addEventListener("keydown", (ev) => {
+      if (ev.key === "Escape") { ev.preventDefault(); closeNoteEditor(); return; }
+      if ((ev.metaKey || ev.ctrlKey) && ev.key === "Enter") { ev.preventDefault(); saveNoteFromEditor(); }
+    });
+    noteEditorSave.addEventListener("click", () => saveNoteFromEditor());
+    noteEditorDelete.addEventListener("click", () => deleteNoteFromEditor());
+    noteEditorClose.addEventListener("click", () => closeNoteEditor());
+    document.addEventListener("mousedown", (ev) => {
+      if (noteEditor.hidden) return;
+      const t = ev.target;
+      if (!(t instanceof Node)) return;
+      if (noteEditor.contains(t)) return;
+      // Clicking another note button reopens the editor for that path; let the
+      // tree click handler run after we close this one.
+      closeNoteEditor();
+    }, true);
+
+    // Clicking the badge on a row opens the editor for that path.
+    tree.addEventListener("click", (ev) => {
+      const badge = ev.target instanceof Element ? ev.target.closest(".jl-note-badge") : null;
+      if (!badge) return;
+      ev.stopPropagation();
+      const node = badge.closest(".jl-node");
+      if (!node) return;
+      const p = node.getAttribute("data-path") || "";
+      if (p) openNoteEditor(node, p);
+    });
+
+    try {
+      if (chrome && chrome.storage && chrome.storage.onChanged) {
+        chrome.storage.onChanged.addListener((changes, area) => {
+          if (area !== "local" || !changes[ANNOTATIONS_KEY]) return;
+          loadAnnotationsForCurrent();
+        });
+      }
+    } catch {}
+    loadAnnotationsForCurrent();
 
     root.querySelector('[data-action="raw"]').addEventListener("click", () => {
       const inRaw = root.classList.toggle("jl-raw-mode");
