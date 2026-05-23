@@ -215,7 +215,80 @@
     return `${(n / (1024 * 1024)).toFixed(2)} MB`;
   }
 
-  function previewPrimitive(v) {
+  // ---------- smart number formatting ----------
+  // Returns { primary, hint } where `primary` is the displayed number text
+  // (with thousands separators when appropriate) and `hint` is an optional
+  // contextual annotation (timestamp, byte size, duration).
+  const TIME_KEY_RE = /(^|_|-|\.)(time|date|ts|timestamp|created|updated|modified|expires?|expiry|deleted|seen|started|ended|issued|iat|exp|nbf|published)(_at)?($|_|-|\.)/i;
+  const MS_KEY_RE   = /(^|_|-|\.)(ms|millis|milliseconds)($|_|-|\.)/i;
+  const BYTES_KEY_RE = /(^|_|-|\.)(bytes?|size|length|filesize|content[-_]?length|byte[-_]?count)($|_|-|\.)/i;
+  const DURATION_KEY_RE = /(^|_|-|\.)(duration|elapsed|latency|response[-_]?time|took|runtime|uptime|age|ttl)($|_|-|\.)/i;
+  function formatDurationMs(ms) {
+    const abs = Math.abs(ms);
+    if (abs < 1000) return `${ms} ms`;
+    if (abs < 60_000) return `${(ms / 1000).toFixed(abs < 10_000 ? 2 : 1)} s`;
+    if (abs < 3_600_000) return `${(ms / 60_000).toFixed(1)} min`;
+    if (abs < 86_400_000) return `${(ms / 3_600_000).toFixed(1)} h`;
+    return `${(ms / 86_400_000).toFixed(1)} d`;
+  }
+  function formatRelTime(d) {
+    const now = Date.now();
+    const diff = d.getTime() - now;
+    const abs = Math.abs(diff);
+    const sign = diff < 0 ? "ago" : "from now";
+    let n, unit;
+    if (abs < 60_000) { n = Math.round(abs / 1000); unit = "s"; }
+    else if (abs < 3_600_000) { n = Math.round(abs / 60_000); unit = "m"; }
+    else if (abs < 86_400_000) { n = Math.round(abs / 3_600_000); unit = "h"; }
+    else if (abs < 30 * 86_400_000) { n = Math.round(abs / 86_400_000); unit = "d"; }
+    else if (abs < 365 * 86_400_000) { n = Math.round(abs / (30 * 86_400_000)); unit = "mo"; }
+    else { n = Math.round(abs / (365 * 86_400_000)); unit = "y"; }
+    return `${n}${unit} ${sign}`;
+  }
+  function smartNumberHint(v, keyHint) {
+    if (!Number.isFinite(v) || !Number.isInteger(v)) return null;
+    const abs = Math.abs(v);
+    const key = keyHint == null ? "" : String(keyHint);
+    const keyLooksLikeTime = TIME_KEY_RE.test(key);
+    const keyLooksLikeMs = MS_KEY_RE.test(key);
+    const keyLooksLikeBytes = BYTES_KEY_RE.test(key);
+    const keyLooksLikeDuration = DURATION_KEY_RE.test(key);
+
+    // Timestamps. Range gates avoid false positives. Unix seconds: 1e9..2e10
+    // (2001..2603). Unix milliseconds: 1e12..2e13.
+    if (abs >= 1e12 && abs <= 2e13 && (keyLooksLikeTime || keyLooksLikeMs || (abs >= 1e12 && abs <= 4e12))) {
+      const d = new Date(v);
+      if (!Number.isNaN(d.getTime())) {
+        try { return { label: `${d.toISOString().slice(0,19).replace("T"," ")}Z · ${formatRelTime(d)}`, kind: "time" }; } catch (_) {}
+      }
+    }
+    if (abs >= 1e9 && abs <= 2e10 && !keyLooksLikeMs && (keyLooksLikeTime || (abs >= 1e9 && abs <= 4e9))) {
+      const d = new Date(v * 1000);
+      if (!Number.isNaN(d.getTime())) {
+        try { return { label: `${d.toISOString().slice(0,19).replace("T"," ")}Z · ${formatRelTime(d)}`, kind: "time" }; } catch (_) {}
+      }
+    }
+
+    // Byte sizes — only when the key hints at a size measurement.
+    if (keyLooksLikeBytes && abs >= 1024) {
+      return { label: formatBytes(abs), kind: "bytes" };
+    }
+
+    // Durations — only when the key hints at a duration. Assume ms by default.
+    if (keyLooksLikeDuration && abs >= 1000) {
+      return { label: formatDurationMs(v), kind: "duration" };
+    }
+    return null;
+  }
+  function formatNumberPrimary(v) {
+    if (!Number.isFinite(v)) return String(v);
+    if (Number.isInteger(v) && Math.abs(v) >= 10_000) {
+      try { return v.toLocaleString("en-US"); } catch (_) { return String(v); }
+    }
+    return String(v);
+  }
+
+  function previewPrimitive(v, keyHint) {
     const t = typeOf(v);
     const span = document.createElement("span");
     if (t === "string") {
@@ -224,7 +297,20 @@
       span.textContent = `"${s}"`;
     } else if (t === "number") {
       span.className = "jl-num";
-      span.textContent = String(v);
+      span.textContent = formatNumberPrimary(v);
+      const hint = smartNumberHint(v, keyHint);
+      if (hint) {
+        const wrap = document.createElement("span");
+        wrap.className = "jl-num-wrap";
+        wrap.appendChild(span);
+        const tag = document.createElement("span");
+        tag.className = `jl-num-hint jl-num-hint-${hint.kind}`;
+        tag.setAttribute("data-kind", hint.kind);
+        tag.setAttribute("aria-hidden", "true");
+        tag.textContent = hint.label;
+        wrap.appendChild(tag);
+        return wrap;
+      }
     } else if (t === "boolean") {
       span.className = "jl-bool";
       span.textContent = String(v);
@@ -948,6 +1034,7 @@
     node.className = "jl-node";
     node.setAttribute("data-type", t);
     node.setAttribute("data-path", pathStr);
+    if (key !== undefined && key !== null) node.setAttribute("data-key", String(key));
 
     const row = document.createElement("div");
     row.className = "jl-row";
@@ -1005,7 +1092,7 @@
       const n = Object.keys(value).length;
       preview.innerHTML = `<span class="jl-punc">{</span><span class="jl-count">${n} ${n === 1 ? "key" : "keys"}</span><span class="jl-punc">}</span>`;
     } else {
-      preview.appendChild(previewPrimitive(value));
+      preview.appendChild(previewPrimitive(value, key));
     }
     row.appendChild(preview);
 
@@ -1763,7 +1850,8 @@
               const preview = row.querySelector(".jl-preview");
               if (!preview) return;
               preview.innerHTML = "";
-              preview.appendChild(previewPrimitive(value));
+              const keyHint = node.getAttribute("data-key");
+              preview.appendChild(previewPrimitive(value, keyHint));
             }
 
             function applyEdit(node, pathStr, newValue) {
