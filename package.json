@@ -1,0 +1,12 @@
+{
+  "name": "json-lens",
+  "version": "0.1.0",
+  "description": "Interactive JSON viewer with live jq-style filter, schema inference, diff, and copy-as-typescript-interface.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "lint": "echo 'no-op'",
+    "test": "node scripts/smoke.mjs",
+    "build": "echo 'no-op'"
+  }
+}

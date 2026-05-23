@@ -1,0 +1,19 @@
+# Roadmap
+
+This file is the agent's task queue. Unchecked items get implemented in order. When all items are checked, the agent appends a new batch of 10.
+
+- [ ] MV3 manifest + content script scaffolding
+- [ ] Auto-detect JSON content-type and replace raw view
+- [ ] Collapsible tree view with type badges
+- [ ] Live filter bar (jq-style path filtering)
+- [ ] Search keys and values with highlight
+- [ ] Inferred schema panel (types + counts)
+- [ ] Copy node as TypeScript interface
+- [ ] Copy node as JSON Schema
+- [ ] Diff two JSON URLs side-by-side
+- [ ] Pretty-print + minify toggle
+- [ ] Path breadcrumb on hover
+- [ ] Export filtered subtree
+- [ ] Performance mode for >10MB JSON (virtualized tree)
+- [ ] Liquid-glass overlay UI
+- [ ] Dark/light theme + monospace tweaks
