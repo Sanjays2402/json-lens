@@ -664,6 +664,7 @@
     at: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.5"/><path d="M15.5 12V13.5a2.5 2.5 0 0 0 5 0V12a8.5 8.5 0 1 0-3.6 6.9"/></svg>`,
     network: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="3" width="8" height="5" rx="1.2"/><rect x="3" y="16" width="7" height="5" rx="1.2"/><rect x="14" y="16" width="7" height="5" rx="1.2"/><path d="M12 8v4M6.5 16v-2h11v2"/></svg>`,
     share: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12v7a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-7"/><path d="M12 4v12"/><path d="M7 9l5-5 5 5"/></svg>`,
+    flame: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3c1.5 3 4.5 4.5 4.5 8a4.5 4.5 0 1 1-9 0c0-1.8 1-3 1-4.5 0 1.2 1 2 2 2 0-2 .5-3.5 1.5-5.5z"/><path d="M10.5 16.5c.5 1 1 1.5 1.5 1.5s1-.5 1.5-1.5"/></svg>`,
   };
 
   // ---------- history (snapshots per URL) ----------
@@ -2409,6 +2410,7 @@
             <button class="jl-btn" data-action="copy" title="Copy JSON" aria-label="Copy JSON">${ICONS.copy}<span>Copy</span></button>
             <button class="jl-btn" data-action="download" title="Download JSON" aria-label="Download JSON">${ICONS.download}<span>Save</span></button>
             <button class="jl-btn jl-btn-ghost" data-action="snapshot" title="Export standalone shareable HTML snapshot" aria-label="Export standalone HTML snapshot">${ICONS.share}<span>Snapshot</span></button>
+            <button class="jl-btn jl-btn-ghost" data-action="heatmap" title="Heatmap — colorize numeric leaves by magnitude within their array" aria-label="Toggle heatmap mode" aria-pressed="false">${ICONS.flame}<span>Heatmap</span></button>
             <button class="jl-btn jl-btn-ghost jl-btn-curl" data-action="copy-curl-patch" title="Copy edits as curl PATCH" aria-label="Copy edits as curl PATCH" disabled aria-disabled="true">${ICONS.patch}<span>cURL PATCH</span><span class="jl-curl-count" aria-hidden="true"></span></button>
             <button class="jl-btn jl-btn-ghost" data-action="schema" title="Inferred schema" aria-label="Inferred schema" aria-pressed="false">${ICONS.schema}<span>Schema</span></button>
             <button class="jl-btn jl-btn-ghost" data-action="diff" title="Diff against another JSON URL" aria-label="Diff against another JSON URL" aria-pressed="false">${ICONS.diff}<span>Diff</span></button>
@@ -3198,6 +3200,104 @@
       setAllCollapsed(tree, true);
       flash(root, "Collapsed");
     });
+    // ---------- heatmap wiring ----------
+    // Walk parsed JSON. For each array, group numeric leaves either by
+    // "" (when items are numbers directly) or by relative path within each
+    // item object. Within each group, normalize values to [0,1] using min/max
+    // and tag the matching DOM node so CSS can paint a magnitude pill.
+    const heatBtn = root.querySelector('[data-action="heatmap"]');
+    if (heatBtn) {
+      const computeHeatmap = (rootVal) => {
+        const heat = new Map();
+        const segFor = (k) => {
+          if (typeof k === "number") return `[${k}]`;
+          return IDENT_RE.test(k) ? "." + k : `["${String(k).replace(/\\/g,"\\\\").replace(/"/g,'\\"')}"]`;
+        };
+        const collectLeaves = (obj, basePath, relPrefix, groups) => {
+          for (const k of Object.keys(obj)) {
+            const val = obj[k];
+            const rel = relPrefix + segFor(k);
+            if (typeof val === "number" && Number.isFinite(val)) {
+              if (!groups.has(rel)) groups.set(rel, []);
+              groups.get(rel).push({ path: basePath + rel, val });
+            } else if (val && typeof val === "object" && !Array.isArray(val)) {
+              collectLeaves(val, basePath, rel, groups);
+            }
+          }
+        };
+        const walk = (value, pathStr) => {
+          if (Array.isArray(value)) {
+            const groups = new Map();
+            for (let i = 0; i < value.length; i++) {
+              const item = value[i];
+              const itemPath = pathStr + "[" + i + "]";
+              if (typeof item === "number" && Number.isFinite(item)) {
+                if (!groups.has("")) groups.set("", []);
+                groups.get("").push({ path: itemPath, val: item });
+              } else if (item && typeof item === "object" && !Array.isArray(item)) {
+                collectLeaves(item, itemPath, "", groups);
+              }
+              walk(item, itemPath);
+            }
+            for (const [, arr] of groups) {
+              if (arr.length < 2) continue;
+              let min = Infinity, max = -Infinity;
+              for (const e of arr) { if (e.val < min) min = e.val; if (e.val > max) max = e.val; }
+              const range = max - min;
+              for (const e of arr) {
+                heat.set(e.path, range === 0 ? 0.5 : (e.val - min) / range);
+              }
+            }
+          } else if (value && typeof value === "object") {
+            for (const k of Object.keys(value)) {
+              walk(value[k], joinPath(pathStr, k));
+            }
+          }
+        };
+        walk(rootVal, "$");
+        return heat;
+      };
+      const applyHeatmap = (heat) => {
+        const nodes = tree.querySelectorAll('.jl-node[data-type="number"]');
+        let painted = 0;
+        nodes.forEach((n) => {
+          const p = n.getAttribute("data-path");
+          const h = p ? heat.get(p) : undefined;
+          const numEl = n.querySelector(":scope > .jl-row .jl-preview .jl-num");
+          if (!numEl) return;
+          if (h === undefined) {
+            numEl.classList.remove("jl-heat-val");
+            numEl.style.removeProperty("--jl-heat");
+          } else {
+            numEl.classList.add("jl-heat-val");
+            numEl.style.setProperty("--jl-heat", h.toFixed(4));
+            painted++;
+          }
+        });
+        return painted;
+      };
+      const clearHeatmap = () => {
+        tree.querySelectorAll(".jl-num.jl-heat-val").forEach((el) => {
+          el.classList.remove("jl-heat-val");
+          el.style.removeProperty("--jl-heat");
+        });
+      };
+      heatBtn.addEventListener("click", () => {
+        const on = root.classList.toggle("jl-heatmap");
+        heatBtn.setAttribute("aria-pressed", String(on));
+        if (on) {
+          // Heatmap needs the full tree in DOM; drain perf-mode lazy nodes
+          // so deeper numeric leaves get painted too.
+          if (PERF_MODE) materializeAll(tree);
+          const heat = computeHeatmap(parsed);
+          const painted = applyHeatmap(heat);
+          flash(root, painted > 0 ? `Heatmap on — ${painted} value${painted === 1 ? "" : "s"}` : "Heatmap on — no comparable arrays");
+        } else {
+          clearHeatmap();
+          flash(root, "Heatmap off");
+        }
+      });
+    }
     // ---------- theme switch wiring ----------
     const themeSwitch = root.querySelector(".jl-theme-switch");
     if (themeSwitch) {
@@ -5088,6 +5188,7 @@
         { id: "copy", label: "Copy JSON to clipboard", hint: "Clipboard", icon: ICONS.copy, run: () => root.querySelector('[data-action="copy"]').click() },
         { id: "download", label: "Download JSON", hint: "File", icon: ICONS.download, run: () => root.querySelector('[data-action="download"]').click() },
         { id: "snapshot", label: "Export standalone HTML snapshot", hint: "Share", icon: ICONS.share, run: () => root.querySelector('[data-action="snapshot"]').click() },
+        { id: "heatmap", label: root.classList.contains("jl-heatmap") ? "Disable heatmap mode" : "Heatmap — colorize numeric leaves by magnitude", hint: "View", icon: ICONS.flame, run: () => root.querySelector('[data-action="heatmap"]').click() },
         ...(curlBtn && !curlBtn.disabled ? [
           { id: "copy-curl-patch", label: "Copy edits as cURL PATCH", hint: "Clipboard", icon: ICONS.patch, run: () => curlBtn.click() },
         ] : []),
