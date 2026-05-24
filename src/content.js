@@ -666,6 +666,7 @@
     share: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12v7a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-7"/><path d="M12 4v12"/><path d="M7 9l5-5 5 5"/></svg>`,
     flame: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3c1.5 3 4.5 4.5 4.5 8a4.5 4.5 0 1 1-9 0c0-1.8 1-3 1-4.5 0 1.2 1 2 2 2 0-2 .5-3.5 1.5-5.5z"/><path d="M10.5 16.5c.5 1 1 1.5 1.5 1.5s1-.5 1.5-1.5"/></svg>`,
     chart: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4v15a1 1 0 0 0 1 1h15"/><path d="M7 15l4-5 3 3 5-7"/><circle cx="7" cy="15" r="1" fill="currentColor" stroke="none"/><circle cx="11" cy="10" r="1" fill="currentColor" stroke="none"/><circle cx="14" cy="13" r="1" fill="currentColor" stroke="none"/><circle cx="19" cy="6" r="1" fill="currentColor" stroke="none"/></svg>`,
+    queries: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5h10l4 4v10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z"/><path d="M14 5v5h5"/><path d="M8 13h6"/><path d="M8 17h4"/><circle cx="16.5" cy="16.5" r="2.4"/><path d="M18.4 18.4L20 20"/></svg>`,
   };
 
   // ---------- history (snapshots per URL) ----------
@@ -2663,6 +2664,7 @@
             <button class="jl-btn jl-btn-ghost" data-action="schema" title="Inferred schema" aria-label="Inferred schema" aria-pressed="false">${ICONS.schema}<span>Schema</span></button>
             <button class="jl-btn jl-btn-ghost" data-action="diff" title="Diff against another JSON URL" aria-label="Diff against another JSON URL" aria-pressed="false">${ICONS.diff}<span>Diff</span></button>
             <button class="jl-btn jl-btn-ghost" data-action="jsonpath" title="JSONPath evaluator" aria-label="JSONPath evaluator" aria-pressed="false">${ICONS.jsonpath}<span>JSONPath</span></button>
+            <button class="jl-btn jl-btn-ghost" data-action="queries" title="Saved queries for this domain (Q)" aria-label="Saved query workspace" aria-pressed="false">${ICONS.queries}<span>Queries</span><span class="jl-q-count" aria-hidden="true"></span></button>
             <button class="jl-btn jl-btn-ghost" data-action="graphql" title="GraphQL operation & variables" aria-label="GraphQL panel" aria-pressed="false"${isGQL ? "" : " hidden"}>${ICONS.graphql}<span>GraphQL</span>${gqlErrorCount ? `<span class="jl-gql-count" aria-hidden="true">${gqlErrorCount}</span>` : ""}</button>
             <button class="jl-btn jl-btn-ghost" data-action="bookmarks" title="Bookmarks (B)" aria-label="Bookmarks" aria-pressed="false">${ICONS.bookmark}<span>Bookmarks</span></button>
             <button class="jl-btn jl-btn-ghost" data-action="pins" title="Pinned nodes (P) — drag any row here to pin" aria-label="Pinned nodes" aria-pressed="false">${ICONS.pin}<span>Pins</span><span class="jl-pin-count" aria-hidden="true"></span></button>
@@ -2985,6 +2987,69 @@
             </div>
             <pre class="jl-hist-viewer-pre"><code></code></pre>
           </div>
+        </aside>
+        <aside class="jl-queries-panel" hidden aria-label="Saved query workspace">
+          <div class="jl-q-header">
+            <div class="jl-q-title">
+              <span class="jl-q-title-icon" aria-hidden="true">${ICONS.queries}</span>
+              <span>Saved queries</span>
+            </div>
+            <div class="jl-q-summary" aria-live="polite"></div>
+            <div class="jl-q-tools">
+              <button class="jl-btn jl-q-add" type="button" title="Save current filter as a named query" aria-label="Save current filter as a named query">${ICONS.plus}<span>Save</span></button>
+              <button class="jl-btn jl-btn-ghost jl-q-close" type="button" title="Close saved queries" aria-label="Close saved queries">${ICONS.close}</button>
+            </div>
+          </div>
+          <div class="jl-q-domain">
+            <span class="jl-q-domain-icon" aria-hidden="true">${ICONS.globe}</span>
+            <span class="jl-q-domain-label">Domain</span>
+            <span class="jl-q-domain-host"></span>
+          </div>
+          <div class="jl-q-search" role="search">
+            <span class="jl-q-search-icon" aria-hidden="true">${ICONS.search}</span>
+            <input class="jl-q-search-input" type="text" spellcheck="false" autocomplete="off"
+                   placeholder="Search queries — name, expression, #tag" aria-label="Search saved queries" />
+          </div>
+          <div class="jl-q-body" role="list"></div>
+          <div class="jl-q-empty" hidden>
+            <svg class="jl-q-empty-art" viewBox="0 0 160 110" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M28 24c12-6 32-8 50-2" opacity="0.4"/>
+              <rect x="40" y="24" width="68" height="60" rx="6"/>
+              <path d="M50 38h40M50 50h44M50 62h28" opacity="0.65"/>
+              <circle cx="112" cy="78" r="12"/>
+              <path d="M120 86l8 8" />
+              <path d="M132 28l3 7 7 1-5 4 1 7-6-3-6 3 1-7-5-4 7-1z" opacity="0.6"/>
+            </svg>
+            <div class="jl-q-empty-title">No saved queries yet</div>
+            <div class="jl-q-empty-hint">Type a jq path or JSONPath expression, then click <strong>Save</strong> to name it. Queries are kept per domain so you can reuse them across endpoints on the same API.</div>
+            <button class="jl-btn jl-q-empty-add" type="button">${ICONS.plus}<span>Save current query</span></button>
+          </div>
+          <form class="jl-q-edit" hidden autocomplete="off">
+            <div class="jl-q-edit-title"></div>
+            <label class="jl-q-edit-field">
+              <span>Name</span>
+              <input class="jl-q-edit-name" type="text" spellcheck="false" maxlength="120" placeholder="e.g. orders with errors" />
+            </label>
+            <label class="jl-q-edit-field">
+              <span>Kind</span>
+              <div class="jl-q-edit-kind" role="radiogroup" aria-label="Query kind">
+                <label class="jl-q-edit-kindopt"><input type="radio" name="jl-q-kind" value="jq" /><span>jq path</span></label>
+                <label class="jl-q-edit-kindopt"><input type="radio" name="jl-q-kind" value="jsonpath" /><span>JSONPath</span></label>
+              </div>
+            </label>
+            <label class="jl-q-edit-field">
+              <span>Expression</span>
+              <input class="jl-q-edit-expr" type="text" spellcheck="false" placeholder=".items[].name  or  $..price" />
+            </label>
+            <label class="jl-q-edit-field">
+              <span>Tags</span>
+              <input class="jl-q-edit-tags" type="text" spellcheck="false" placeholder="comma or space separated, e.g. orders, errors" />
+            </label>
+            <div class="jl-q-edit-actions">
+              <button type="button" class="jl-btn jl-btn-ghost jl-q-edit-cancel">Cancel</button>
+              <button type="submit" class="jl-btn jl-q-edit-save">Save</button>
+            </div>
+          </form>
         </aside>
         <div class="jl-palette-backdrop" hidden aria-hidden="true"></div>
         <div class="jl-palette" hidden role="dialog" aria-modal="true" aria-label="Command palette">
@@ -5277,6 +5342,358 @@
     ns.parseTagInput = parseTagInput;
     ns.deriveBookmarkName = deriveBookmarkName;
 
+    // ---------- saved query workspace ----------
+    // Per-domain (host) named jq/JSONPath expressions, persisted in
+    // chrome.storage.local under QUERIES_KEY. Shape:
+    //   { [host]: [ { id, name, kind: 'jq'|'jsonpath', expr, tags, addedAt, lastRunAt } ] }
+    const QUERIES_KEY = "json-lens:queries";
+    const QUERIES_PER_HOST = 200;
+
+    function queriesStorage() {
+      try { return chrome && chrome.storage && chrome.storage.local ? chrome.storage.local : null; }
+      catch { return null; }
+    }
+    function currentHost() {
+      try { return new URL(location.href).host || location.hostname || ""; }
+      catch { return location.hostname || ""; }
+    }
+    function coerceQuery(q) {
+      if (!q || typeof q !== "object") return null;
+      const expr = String(q.expr || "");
+      if (!expr) return null;
+      const kind = q.kind === "jsonpath" ? "jsonpath" : "jq";
+      return {
+        id: String(q.id || cryptoIdish()),
+        name: String(q.name || expr).slice(0, 200),
+        kind,
+        expr,
+        tags: Array.isArray(q.tags) ? q.tags.map(String).filter(Boolean).slice(0, 16) : [],
+        addedAt: Number(q.addedAt) || Date.now(),
+        lastRunAt: Number(q.lastRunAt) || 0,
+      };
+    }
+    function loadAllQueries() {
+      return new Promise((resolve) => {
+        const s = queriesStorage();
+        if (!s) { resolve({}); return; }
+        try {
+          s.get(QUERIES_KEY, (obj) => {
+            if (chrome.runtime && chrome.runtime.lastError) { resolve({}); return; }
+            const v = obj && obj[QUERIES_KEY];
+            if (!v || typeof v !== "object") { resolve({}); return; }
+            const out = {};
+            for (const k of Object.keys(v)) {
+              const arr = Array.isArray(v[k]) ? v[k].map(coerceQuery).filter(Boolean) : [];
+              if (arr.length) out[k] = arr.slice(0, QUERIES_PER_HOST);
+            }
+            resolve(out);
+          });
+        } catch { resolve({}); }
+      });
+    }
+    function saveAllQueries(map) {
+      return new Promise((resolve) => {
+        const s = queriesStorage();
+        if (!s) { resolve(false); return; }
+        try {
+          s.set({ [QUERIES_KEY]: map }, () => resolve(!(chrome.runtime && chrome.runtime.lastError)));
+        } catch { resolve(false); }
+      });
+    }
+    function queryMatchesFilter(q, query) {
+      if (!query) return true;
+      const ql = query.toLowerCase();
+      if (ql.startsWith("#")) {
+        const t = ql.slice(1);
+        return q.tags.some((tag) => tag.toLowerCase() === t);
+      }
+      return (
+        q.name.toLowerCase().includes(ql) ||
+        q.expr.toLowerCase().includes(ql) ||
+        q.kind.toLowerCase().includes(ql) ||
+        q.tags.some((t) => t.toLowerCase().includes(ql))
+      );
+    }
+    function guessKindFromExpr(expr) {
+      const s = String(expr || "").trim();
+      if (!s) return "jq";
+      if (s.startsWith("$")) return "jsonpath";
+      return "jq";
+    }
+
+    const qBtn = root.querySelector('[data-action="queries"]');
+    const qCountChip = qBtn.querySelector(".jl-q-count");
+    const qPanel = root.querySelector(".jl-queries-panel");
+    const qCloseBtn = root.querySelector(".jl-q-close");
+    const qAddBtn = root.querySelector(".jl-q-add");
+    const qEmpty = root.querySelector(".jl-q-empty");
+    const qEmptyAdd = root.querySelector(".jl-q-empty-add");
+    const qBody = root.querySelector(".jl-q-body");
+    const qSummary = root.querySelector(".jl-q-summary");
+    const qSearchInput = root.querySelector(".jl-q-search-input");
+    const qDomainHost = root.querySelector(".jl-q-domain-host");
+    const qEditForm = root.querySelector(".jl-q-edit");
+    const qEditTitleEl = root.querySelector(".jl-q-edit-title");
+    const qEditName = root.querySelector(".jl-q-edit-name");
+    const qEditExpr = root.querySelector(".jl-q-edit-expr");
+    const qEditTags = root.querySelector(".jl-q-edit-tags");
+    const qEditCancel = root.querySelector(".jl-q-edit-cancel");
+    const qEditKindRadios = Array.from(root.querySelectorAll('input[name="jl-q-kind"]'));
+
+    const QUERY_HOST = currentHost() || "(local)";
+    qDomainHost.textContent = QUERY_HOST;
+
+    let queriesAll = {};
+    let queriesForHost = [];
+    let qEditingId = null;
+    let qPendingNew = null;
+
+    function refreshQueriesCount() {
+      const n = queriesForHost.length;
+      qCountChip.textContent = n > 0 ? String(n) : "";
+    }
+
+    function renderQueries() {
+      const q = qSearchInput.value.trim();
+      let list = queriesForHost.slice();
+      if (q) list = list.filter((x) => queryMatchesFilter(x, q));
+      list.sort((a, b) => (b.lastRunAt || b.addedAt) - (a.lastRunAt || a.addedAt));
+      qSummary.textContent = queriesForHost.length === 0
+        ? ""
+        : `${list.length} of ${queriesForHost.length} · ${QUERY_HOST}`;
+      qBody.innerHTML = "";
+      if (queriesForHost.length === 0) {
+        qEmpty.hidden = false;
+        qBody.hidden = true;
+        return;
+      }
+      qEmpty.hidden = true;
+      qBody.hidden = false;
+      if (list.length === 0) {
+        const note = document.createElement("div");
+        note.className = "jl-q-noresults";
+        note.textContent = "No queries match this filter.";
+        qBody.appendChild(note);
+        return;
+      }
+      const frag = document.createDocumentFragment();
+      for (const it of list) {
+        const card = document.createElement("div");
+        card.className = "jl-q-card";
+        card.setAttribute("role", "listitem");
+        card.setAttribute("data-id", it.id);
+        const tagsHTML = it.tags.length
+          ? `<div class="jl-q-card-tags">${it.tags.map((t) => `<span class="jl-q-tagchip"><span class="jl-q-tagchip-hash">#</span>${escapeHTML(t)}</span>`).join("")}</div>`
+          : "";
+        card.innerHTML = `
+          <button type="button" class="jl-q-card-main" data-act="run" title="Run ${escapeHTML(it.expr)}">
+            <div class="jl-q-card-head">
+              <span class="jl-q-card-name">${escapeHTML(it.name)}</span>
+              <span class="jl-q-kind-pill jl-q-kind-${it.kind}">${it.kind === "jsonpath" ? "JSONPath" : "jq"}</span>
+            </div>
+            <div class="jl-q-card-expr"><code>${escapeHTML(it.expr)}</code></div>
+            ${tagsHTML}
+            <div class="jl-q-card-meta">Saved ${relativeTime(it.addedAt) || "recently"}${it.lastRunAt ? ` · ran ${relativeTime(it.lastRunAt)}` : ""}</div>
+          </button>
+          <div class="jl-q-card-actions">
+            <button type="button" class="jl-q-iconbtn" data-act="copy" title="Copy expression" aria-label="Copy expression">${ICONS.copy}</button>
+            <button type="button" class="jl-q-iconbtn" data-act="edit" title="Edit query" aria-label="Edit query">${ICONS.pencil}</button>
+            <button type="button" class="jl-q-iconbtn jl-q-iconbtn-danger" data-act="remove" title="Delete query" aria-label="Delete query">${ICONS.trash}</button>
+          </div>`;
+        frag.appendChild(card);
+      }
+      qBody.appendChild(frag);
+    }
+
+    function setQueryKindRadio(kind) {
+      for (const r of qEditKindRadios) r.checked = r.value === kind;
+    }
+    function getQueryKindRadio() {
+      const r = qEditKindRadios.find((x) => x.checked);
+      return r ? r.value : "jq";
+    }
+
+    function openQueryEdit(item) {
+      qEditingId = item.id;
+      qEditTitleEl.textContent = item === qPendingNew ? "Save new query" : "Edit query";
+      qEditName.value = item.name;
+      qEditExpr.value = item.expr;
+      qEditTags.value = item.tags.join(", ");
+      setQueryKindRadio(item.kind);
+      qEditForm.hidden = false;
+      qBody.classList.add("jl-q-body-dim");
+      setTimeout(() => qEditName.focus(), 30);
+    }
+    function closeQueryEdit() {
+      qEditingId = null;
+      qPendingNew = null;
+      qEditForm.hidden = true;
+      qBody.classList.remove("jl-q-body-dim");
+    }
+
+    async function persistQueries() {
+      queriesAll[QUERY_HOST] = queriesForHost.slice(0, QUERIES_PER_HOST);
+      await saveAllQueries(queriesAll);
+      refreshQueriesCount();
+      if (!qPanel.hidden) renderQueries();
+    }
+
+    async function saveCurrentAsQuery() {
+      const filterExpr = (filterInput.value || "").trim();
+      const jpExpr = (jpInput.value || "").trim();
+      let kind = "jq";
+      let expr = "";
+      if (filterExpr && !jpExpr) { kind = "jq"; expr = filterExpr; }
+      else if (!filterExpr && jpExpr) { kind = "jsonpath"; expr = jpExpr; }
+      else if (filterExpr && jpExpr) { kind = jpPanel && !jpPanel.hidden ? "jsonpath" : "jq"; expr = kind === "jq" ? filterExpr : jpExpr; }
+      qPendingNew = {
+        id: cryptoIdish(),
+        name: expr || "Untitled query",
+        kind,
+        expr,
+        tags: [],
+        addedAt: Date.now(),
+        lastRunAt: 0,
+      };
+      openQueryEdit(qPendingNew);
+    }
+
+    function applyQuery(item) {
+      if (!item || !item.expr) return;
+      if (item.kind === "jsonpath") {
+        setJsonPathOpen(true);
+        jpInput.value = item.expr;
+        runJsonPath();
+      } else {
+        filterInput.value = item.expr;
+        runFilter(item.expr);
+        filterInput.focus();
+      }
+      item.lastRunAt = Date.now();
+      // Persist usage timestamp without blocking the UI.
+      persistQueries();
+      flash(root, `Applied “${item.name}”`);
+    }
+
+    qEditForm.addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      const name = (qEditName.value || "").trim() || (qEditExpr.value || "").trim() || "Untitled query";
+      const expr = (qEditExpr.value || "").trim();
+      const kind = getQueryKindRadio();
+      const tags = parseTagInput(qEditTags.value);
+      if (!expr) { flash(root, "Expression required"); return; }
+      if (qPendingNew && qEditingId === qPendingNew.id) {
+        qPendingNew.name = name;
+        qPendingNew.kind = kind;
+        qPendingNew.expr = expr;
+        qPendingNew.tags = tags;
+        queriesForHost.unshift(qPendingNew);
+        flash(root, "Query saved");
+      } else {
+        const target = queriesForHost.find((x) => x.id === qEditingId);
+        if (target) { target.name = name; target.kind = kind; target.expr = expr; target.tags = tags; flash(root, "Query updated"); }
+      }
+      closeQueryEdit();
+      await persistQueries();
+    });
+    qEditCancel.addEventListener("click", () => closeQueryEdit());
+    qEditForm.addEventListener("keydown", (ev) => {
+      if (ev.key === "Escape") { ev.preventDefault(); closeQueryEdit(); }
+    });
+
+    qEditExpr.addEventListener("input", () => {
+      // Auto-detect kind when user hasn't manually picked.
+      const guessed = guessKindFromExpr(qEditExpr.value);
+      // Only flip when current selection still matches the previous guess to
+      // respect explicit user choice.
+      setQueryKindRadio(guessed);
+    });
+
+    qAddBtn.addEventListener("click", saveCurrentAsQuery);
+    qEmptyAdd.addEventListener("click", saveCurrentAsQuery);
+
+    qSearchInput.addEventListener("input", () => renderQueries());
+    qSearchInput.addEventListener("keydown", (ev) => {
+      if (ev.key === "Escape") { ev.preventDefault(); qSearchInput.value = ""; renderQueries(); }
+    });
+
+    qBody.addEventListener("click", async (ev) => {
+      const target = ev.target instanceof Element ? ev.target : null;
+      if (!target) return;
+      const card = target.closest(".jl-q-card");
+      if (!card) return;
+      const id = card.getAttribute("data-id");
+      const it = queriesForHost.find((x) => x.id === id);
+      if (!it) return;
+      const actBtn = target.closest("[data-act]");
+      const act = actBtn ? actBtn.getAttribute("data-act") : null;
+      if (act === "remove") {
+        queriesForHost = queriesForHost.filter((x) => x.id !== id);
+        flash(root, "Query removed");
+        await persistQueries();
+        return;
+      }
+      if (act === "edit") { openQueryEdit(it); return; }
+      if (act === "copy") {
+        try { await navigator.clipboard.writeText(it.expr); flash(root, "Copied expression"); }
+        catch { flash(root, "Copy failed"); }
+        return;
+      }
+      // default = run
+      applyQuery(it);
+      setQueriesOpen(false);
+    });
+
+    function setQueriesOpen(open) {
+      qPanel.hidden = !open;
+      root.classList.toggle("jl-queries-open", open);
+      qBtn.setAttribute("aria-pressed", String(open));
+      if (open) {
+        closeQueryEdit();
+        renderQueries();
+        setTimeout(() => qSearchInput.focus(), 60);
+      }
+    }
+    qBtn.addEventListener("click", () => setQueriesOpen(qPanel.hidden));
+    qCloseBtn.addEventListener("click", () => setQueriesOpen(false));
+
+    // 'Q' toggles queries panel when not typing.
+    document.addEventListener("keydown", (ev) => {
+      if (ev.key !== "q" && ev.key !== "Q") return;
+      if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
+      const t = ev.target;
+      const tag = t && t.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || (t && t.isContentEditable)) return;
+      ev.preventDefault();
+      setQueriesOpen(qPanel.hidden);
+    });
+
+    // Cross-tab/view live sync.
+    try {
+      if (chrome && chrome.storage && chrome.storage.onChanged) {
+        chrome.storage.onChanged.addListener((changes, area) => {
+          if (area !== "local" || !changes[QUERIES_KEY]) return;
+          const next = changes[QUERIES_KEY].newValue;
+          if (!next || typeof next !== "object") return;
+          queriesAll = next;
+          queriesForHost = Array.isArray(queriesAll[QUERY_HOST]) ? queriesAll[QUERY_HOST].map(coerceQuery).filter(Boolean) : [];
+          refreshQueriesCount();
+          if (!qPanel.hidden) renderQueries();
+        });
+      }
+    } catch {}
+
+    loadAllQueries().then((map) => {
+      queriesAll = map;
+      queriesForHost = Array.isArray(queriesAll[QUERY_HOST]) ? queriesAll[QUERY_HOST] : [];
+      refreshQueriesCount();
+      if (!qPanel.hidden) renderQueries();
+    });
+
+    ns.queryMatchesFilter = queryMatchesFilter;
+    ns.guessKindFromExpr = guessKindFromExpr;
+    ns.coerceQuery = coerceQuery;
+
     // ---------- history panel ----------
     const histBtn = root.querySelector('[data-action="history"]');
     const histPanel = root.querySelector(".jl-history-panel");
@@ -5534,6 +5951,8 @@
         { id: "schema", label: "Toggle inferred schema panel", hint: "Panel", icon: ICONS.schema, run: () => root.querySelector('[data-action="schema"]').click() },
         { id: "diff", label: "Toggle diff against another URL", hint: "Panel", icon: ICONS.diff, run: () => root.querySelector('[data-action="diff"]').click() },
         { id: "jsonpath", label: "Toggle JSONPath evaluator panel", hint: "Panel", icon: ICONS.jsonpath, run: () => root.querySelector('[data-action="jsonpath"]').click() },
+        { id: "queries", label: "Toggle saved queries workspace", hint: "Q", icon: ICONS.queries, run: () => root.querySelector('[data-action="queries"]').click() },
+        { id: "queries-save", label: "Save current filter as a named query", hint: "Save", icon: ICONS.plus, run: () => { root.querySelector('[data-action="queries"]').click(); setTimeout(() => root.querySelector('.jl-q-add').click(), 60); } },
         ...(isGqlResp ? [
           { id: "graphql", label: "Toggle GraphQL operation & variables", hint: "Panel", icon: ICONS.graphql, run: () => root.querySelector('[data-action="graphql"]').click() },
         ] : []),
