@@ -36,4 +36,4 @@ This file is the agent's task queue. Unchecked items get implemented in order. W
 - [x] Heatmap mode — colorize numeric leaves by relative magnitude within their array
 - [x] Time-series detection: chart numeric arrays of {timestamp, value} inline
 - [x] Saved query workspace — store named jq/JSONPath expressions per domain
-- [ ] Settings panel with theme, font, indent width, and accent color picker
+- [x] Settings panel with theme, font, indent width, and accent color picker

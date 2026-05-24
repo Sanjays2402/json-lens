@@ -667,6 +667,10 @@
     flame: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3c1.5 3 4.5 4.5 4.5 8a4.5 4.5 0 1 1-9 0c0-1.8 1-3 1-4.5 0 1.2 1 2 2 2 0-2 .5-3.5 1.5-5.5z"/><path d="M10.5 16.5c.5 1 1 1.5 1.5 1.5s1-.5 1.5-1.5"/></svg>`,
     chart: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4v15a1 1 0 0 0 1 1h15"/><path d="M7 15l4-5 3 3 5-7"/><circle cx="7" cy="15" r="1" fill="currentColor" stroke="none"/><circle cx="11" cy="10" r="1" fill="currentColor" stroke="none"/><circle cx="14" cy="13" r="1" fill="currentColor" stroke="none"/><circle cx="19" cy="6" r="1" fill="currentColor" stroke="none"/></svg>`,
     queries: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5h10l4 4v10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1z"/><path d="M14 5v5h5"/><path d="M8 13h6"/><path d="M8 17h4"/><circle cx="16.5" cy="16.5" r="2.4"/><path d="M18.4 18.4L20 20"/></svg>`,
+    gear: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.86l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.86-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.86.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.34-1.86l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1.03-1.56V3a2 2 0 1 1 4 0v.09A1.7 1.7 0 0 0 15 4.6a1.7 1.7 0 0 0 1.86-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9c.1.5.4.94.86 1.24.3.2.66.3 1.03.3H21a2 2 0 1 1 0 4h-.09A1.7 1.7 0 0 0 19.4 15z"/></svg>`,
+    palette: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 1 0 0 18c1.5 0 2-1 2-2 0-.6-.2-1-.6-1.4-.4-.4-.6-.8-.6-1.4 0-1 .8-1.8 1.8-1.8H17a4 4 0 0 0 4-4 8 8 0 0 0-9-7.4z"/><circle cx="7.5" cy="11" r="1" fill="currentColor" stroke="none"/><circle cx="10" cy="7.5" r="1" fill="currentColor" stroke="none"/><circle cx="14" cy="7.5" r="1" fill="currentColor" stroke="none"/><circle cx="17" cy="11" r="1" fill="currentColor" stroke="none"/></svg>`,
+    type: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 7V5h14v2"/><path d="M12 5v15"/><path d="M9 20h6"/></svg>`,
+    indent: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16"/><path d="M10 12h10"/><path d="M10 18h10"/><path d="M4 10l3 2-3 2"/></svg>`,
   };
 
   // ---------- history (snapshots per URL) ----------
@@ -884,6 +888,72 @@
     };
     if (_themeMql.addEventListener) _themeMql.addEventListener("change", onChange);
     else if (_themeMql.addListener) _themeMql.addListener(onChange);
+  }
+
+  // ---------- settings (font, indent width, accent color) ----------
+  // Persisted in localStorage as a single JSON blob; applied as CSS variables
+  // on `#json-lens-root` so existing styling inherits without per-element work.
+  const SETTINGS_KEY = "json-lens:settings";
+  const FONT_STACKS = {
+    jetbrains: '"JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace',
+    sf:        '"SF Mono", ui-monospace, Menlo, Consolas, monospace',
+    menlo:     'Menlo, ui-monospace, "SF Mono", Consolas, monospace',
+    fira:      '"Fira Code", ui-monospace, "SF Mono", Menlo, Consolas, monospace',
+    cascadia:  '"Cascadia Code", ui-monospace, "SF Mono", Menlo, Consolas, monospace',
+    system:    'ui-monospace, "SF Mono", Menlo, Consolas, monospace',
+  };
+  const INDENT_CHOICES = [2, 3, 4, 8];
+  const FONT_SIZE_MIN = 11;
+  const FONT_SIZE_MAX = 18;
+  const SETTINGS_DEFAULTS = {
+    font: "jetbrains",
+    fontSize: 13,
+    indent: 2,
+    accent: "#f6b352",
+  };
+  const HEX_RE = /^#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})$/;
+  function normalizeSettings(raw) {
+    const s = { ...SETTINGS_DEFAULTS };
+    if (raw && typeof raw === "object") {
+      if (typeof raw.font === "string" && FONT_STACKS[raw.font]) s.font = raw.font;
+      if (Number.isFinite(raw.fontSize)) s.fontSize = Math.max(FONT_SIZE_MIN, Math.min(FONT_SIZE_MAX, Math.round(raw.fontSize)));
+      if (INDENT_CHOICES.includes(raw.indent)) s.indent = raw.indent;
+      if (typeof raw.accent === "string" && HEX_RE.test(raw.accent)) {
+        s.accent = raw.accent.length === 4
+          ? "#" + raw.accent.slice(1).split("").map((c) => c + c).join("")
+          : raw.accent.toLowerCase();
+      }
+    }
+    return s;
+  }
+  function readSettings() {
+    try { return normalizeSettings(JSON.parse(localStorage.getItem(SETTINGS_KEY) || "null")); }
+    catch { return { ...SETTINGS_DEFAULTS }; }
+  }
+  function writeSettings(s) {
+    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch {}
+  }
+  function hexToRgb(hex) {
+    const h = hex.replace("#", "");
+    const n = parseInt(h.length === 3 ? h.split("").map((c) => c + c).join("") : h, 16);
+    return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+  }
+  function rgbaFromHex(hex, a) {
+    const { r, g, b } = hexToRgb(hex);
+    return `rgba(${r}, ${g}, ${b}, ${a})`;
+  }
+  function applySettings(s) {
+    ns.settings = s;
+    const root = document.getElementById("json-lens-root");
+    const targets = root ? [root] : [document.documentElement];
+    for (const el of targets) {
+      el.style.setProperty("--jl-mono", FONT_STACKS[s.font] || FONT_STACKS.jetbrains);
+      el.style.setProperty("--jl-mono-size", `${s.fontSize}px`);
+      el.style.setProperty("--jl-indent", `${s.indent * 4}px`);
+      el.style.setProperty("--jl-indent-spaces", String(s.indent));
+      el.style.setProperty("--accent", s.accent);
+      el.style.setProperty("--accent-soft", rgbaFromHex(s.accent, 0.16));
+    }
   }
 
   // ---------- TypeScript interface generation ----------
@@ -2671,6 +2741,7 @@
             <button class="jl-btn jl-btn-ghost" data-action="history" title="History (H)" aria-label="History timeline" aria-pressed="false">${ICONS.history}<span>History</span><span class="jl-hist-count" aria-hidden="true"></span></button>
             <button class="jl-btn jl-btn-ghost" data-action="palette" title="Command palette (⌘K)" aria-label="Command palette">${ICONS.command}<span>Actions</span></button>
             <button class="jl-btn jl-btn-ghost" data-action="raw" title="Toggle raw view" aria-label="Toggle raw view">${ICONS.raw}<span>Raw</span></button>
+            <button class="jl-btn jl-btn-ghost" data-action="settings" title="Settings — theme, font, indent, accent" aria-label="Settings" aria-pressed="false">${ICONS.gear}<span>Settings</span></button>
             <div class="jl-theme-switch" role="group" aria-label="Theme">
               <button type="button" data-theme="auto" title="Auto theme" aria-label="Auto theme" aria-pressed="false">${ICONS.auto}</button>
               <button type="button" data-theme="light" title="Light theme" aria-label="Light theme" aria-pressed="false">${ICONS.sun}</button>
@@ -3051,6 +3122,96 @@
             </div>
           </form>
         </aside>
+        <aside class="jl-settings-panel" hidden aria-label="JSON Lens settings">
+          <div class="jl-set-header">
+            <div class="jl-set-title">
+              <span class="jl-set-title-icon" aria-hidden="true">${ICONS.gear}</span>
+              <span>Settings</span>
+            </div>
+            <div class="jl-set-summary" aria-live="polite">Theme, font, indent, accent</div>
+            <div class="jl-set-tools">
+              <button class="jl-btn jl-btn-ghost jl-set-reset" type="button" title="Reset all settings to defaults" aria-label="Reset all settings">${ICONS.undo}<span>Reset</span></button>
+              <button class="jl-btn jl-btn-ghost jl-set-close" type="button" title="Close settings" aria-label="Close settings">${ICONS.close}</button>
+            </div>
+          </div>
+          <div class="jl-set-body">
+            <section class="jl-set-section">
+              <header class="jl-set-section-head">
+                <span class="jl-set-section-icon" aria-hidden="true">${ICONS.sun}</span>
+                <div class="jl-set-section-titles">
+                  <div class="jl-set-section-title">Theme</div>
+                  <div class="jl-set-section-hint">Auto follows your OS preference.</div>
+                </div>
+              </header>
+              <div class="jl-set-row jl-set-theme" role="radiogroup" aria-label="Theme">
+                <button type="button" class="jl-set-chip" data-set-theme="auto" aria-pressed="false"><span class="jl-set-chip-icon">${ICONS.auto}</span><span>Auto</span></button>
+                <button type="button" class="jl-set-chip" data-set-theme="light" aria-pressed="false"><span class="jl-set-chip-icon">${ICONS.sun}</span><span>Light</span></button>
+                <button type="button" class="jl-set-chip" data-set-theme="dark" aria-pressed="false"><span class="jl-set-chip-icon">${ICONS.moon}</span><span>Dark</span></button>
+              </div>
+            </section>
+            <section class="jl-set-section">
+              <header class="jl-set-section-head">
+                <span class="jl-set-section-icon" aria-hidden="true">${ICONS.type}</span>
+                <div class="jl-set-section-titles">
+                  <div class="jl-set-section-title">Monospace font</div>
+                  <div class="jl-set-section-hint">Used for the tree, raw view, diff, and search.</div>
+                </div>
+              </header>
+              <div class="jl-set-row jl-set-font" role="radiogroup" aria-label="Monospace font">
+                <button type="button" class="jl-set-chip jl-set-font-chip" data-set-font="jetbrains" aria-pressed="false" style="font-family: 'JetBrains Mono', ui-monospace, monospace;"><span>JetBrains</span></button>
+                <button type="button" class="jl-set-chip jl-set-font-chip" data-set-font="sf" aria-pressed="false" style="font-family: 'SF Mono', ui-monospace, monospace;"><span>SF Mono</span></button>
+                <button type="button" class="jl-set-chip jl-set-font-chip" data-set-font="menlo" aria-pressed="false" style="font-family: Menlo, monospace;"><span>Menlo</span></button>
+                <button type="button" class="jl-set-chip jl-set-font-chip" data-set-font="fira" aria-pressed="false" style="font-family: 'Fira Code', ui-monospace, monospace;"><span>Fira Code</span></button>
+                <button type="button" class="jl-set-chip jl-set-font-chip" data-set-font="cascadia" aria-pressed="false" style="font-family: 'Cascadia Code', ui-monospace, monospace;"><span>Cascadia</span></button>
+                <button type="button" class="jl-set-chip jl-set-font-chip" data-set-font="system" aria-pressed="false" style="font-family: ui-monospace, monospace;"><span>System</span></button>
+              </div>
+              <div class="jl-set-row jl-set-fontsize">
+                <label class="jl-set-label" for="jl-set-fontsize">Font size <span class="jl-set-fontsize-val" aria-live="polite">13px</span></label>
+                <input id="jl-set-fontsize" class="jl-set-range" type="range" min="11" max="18" step="1" value="13" aria-label="Monospace font size" />
+              </div>
+            </section>
+            <section class="jl-set-section">
+              <header class="jl-set-section-head">
+                <span class="jl-set-section-icon" aria-hidden="true">${ICONS.indent}</span>
+                <div class="jl-set-section-titles">
+                  <div class="jl-set-section-title">Indent width</div>
+                  <div class="jl-set-section-hint">Tree nesting depth and pretty-printed JSON indentation.</div>
+                </div>
+              </header>
+              <div class="jl-set-row jl-set-indent" role="radiogroup" aria-label="Indent width">
+                <button type="button" class="jl-set-chip" data-set-indent="2" aria-pressed="false"><span>2 sp</span></button>
+                <button type="button" class="jl-set-chip" data-set-indent="3" aria-pressed="false"><span>3 sp</span></button>
+                <button type="button" class="jl-set-chip" data-set-indent="4" aria-pressed="false"><span>4 sp</span></button>
+                <button type="button" class="jl-set-chip" data-set-indent="8" aria-pressed="false"><span>8 sp</span></button>
+              </div>
+            </section>
+            <section class="jl-set-section">
+              <header class="jl-set-section-head">
+                <span class="jl-set-section-icon" aria-hidden="true">${ICONS.palette}</span>
+                <div class="jl-set-section-titles">
+                  <div class="jl-set-section-title">Accent color</div>
+                  <div class="jl-set-section-hint">Focus rings, badges, key highlights, action chips.</div>
+                </div>
+              </header>
+              <div class="jl-set-row jl-set-accent" role="radiogroup" aria-label="Accent color">
+                <button type="button" class="jl-set-swatch" data-set-accent="#f6b352" style="--sw:#f6b352" aria-pressed="false" title="Amber" aria-label="Amber"></button>
+                <button type="button" class="jl-set-swatch" data-set-accent="#7aa2ff" style="--sw:#7aa2ff" aria-pressed="false" title="Sky" aria-label="Sky"></button>
+                <button type="button" class="jl-set-swatch" data-set-accent="#7a5cff" style="--sw:#7a5cff" aria-pressed="false" title="Violet" aria-label="Violet"></button>
+                <button type="button" class="jl-set-swatch" data-set-accent="#3ecf8e" style="--sw:#3ecf8e" aria-pressed="false" title="Mint" aria-label="Mint"></button>
+                <button type="button" class="jl-set-swatch" data-set-accent="#ff7a90" style="--sw:#ff7a90" aria-pressed="false" title="Rose" aria-label="Rose"></button>
+                <button type="button" class="jl-set-swatch" data-set-accent="#ff9466" style="--sw:#ff9466" aria-pressed="false" title="Coral" aria-label="Coral"></button>
+                <button type="button" class="jl-set-swatch" data-set-accent="#5cc8ff" style="--sw:#5cc8ff" aria-pressed="false" title="Cyan" aria-label="Cyan"></button>
+                <label class="jl-set-swatch jl-set-swatch-custom" title="Custom color">
+                  <input class="jl-set-accent-custom" type="color" value="#f6b352" aria-label="Custom accent color" />
+                  <span class="jl-set-swatch-plus" aria-hidden="true">${ICONS.plus}</span>
+                </label>
+              </div>
+            </section>
+          </div>
+          <div class="jl-set-foot">
+            <span class="jl-set-foot-kbd">Settings persist locally on this device.</span>
+          </div>
+        </aside>
         <div class="jl-palette-backdrop" hidden aria-hidden="true"></div>
         <div class="jl-palette" hidden role="dialog" aria-modal="true" aria-label="Command palette">
           <div class="jl-palette-search">
@@ -3428,7 +3589,8 @@
     // `compact === true`  => single-line minified output.
     // Affects: raw view, Copy, Download. Tree view is unaffected.
     let compact = false;
-    const serialize = () => compact ? JSON.stringify(parsed) : JSON.stringify(parsed, null, 2);
+    const indentSize = () => (ns.settings && ns.settings.indent) || SETTINGS_DEFAULTS.indent;
+    const serialize = () => compact ? JSON.stringify(parsed) : JSON.stringify(parsed, null, indentSize());
     const formatBtn = root.querySelector('[data-action="format"]');
     const formatIcon = formatBtn.querySelector('.jl-format-icon');
     const formatLabel = formatBtn.querySelector('.jl-format-label');
@@ -3717,6 +3879,102 @@
         flash(root, next === "auto" ? "Theme: auto" : next === "light" ? "Theme: light" : "Theme: dark");
       });
     }
+    // ---------- settings panel wiring ----------
+    const setBtn = root.querySelector('[data-action="settings"]');
+    const setPanel = root.querySelector(".jl-settings-panel");
+    const setCloseBtn = root.querySelector(".jl-set-close");
+    const setResetBtn = root.querySelector(".jl-set-reset");
+    const setThemeRow = root.querySelector(".jl-set-theme");
+    const setFontRow = root.querySelector(".jl-set-font");
+    const setFontSize = root.querySelector("#jl-set-fontsize");
+    const setFontSizeVal = root.querySelector(".jl-set-fontsize-val");
+    const setIndentRow = root.querySelector(".jl-set-indent");
+    const setAccentRow = root.querySelector(".jl-set-accent");
+    const setAccentCustom = root.querySelector(".jl-set-accent-custom");
+
+    function refreshSettingsUI() {
+      const s = ns.settings || readSettings();
+      // theme chips reflect current theme pref
+      const themePref = readThemePref();
+      setThemeRow.querySelectorAll("button[data-set-theme]").forEach((b) => {
+        b.setAttribute("aria-pressed", b.dataset.setTheme === themePref ? "true" : "false");
+      });
+      setFontRow.querySelectorAll("button[data-set-font]").forEach((b) => {
+        b.setAttribute("aria-pressed", b.dataset.setFont === s.font ? "true" : "false");
+      });
+      setFontSize.value = String(s.fontSize);
+      setFontSizeVal.textContent = `${s.fontSize}px`;
+      setIndentRow.querySelectorAll("button[data-set-indent]").forEach((b) => {
+        b.setAttribute("aria-pressed", Number(b.dataset.setIndent) === s.indent ? "true" : "false");
+      });
+      let matchedSwatch = false;
+      setAccentRow.querySelectorAll("button[data-set-accent]").forEach((b) => {
+        const match = b.dataset.setAccent.toLowerCase() === s.accent.toLowerCase();
+        b.setAttribute("aria-pressed", match ? "true" : "false");
+        if (match) matchedSwatch = true;
+      });
+      setAccentCustom.value = s.accent;
+      setAccentCustom.closest(".jl-set-swatch-custom").style.setProperty("--sw", s.accent);
+      setAccentCustom.closest(".jl-set-swatch-custom").classList.toggle("jl-set-swatch-active", !matchedSwatch);
+    }
+
+    function updateSettings(patch, opts) {
+      const next = normalizeSettings({ ...(ns.settings || readSettings()), ...patch });
+      writeSettings(next);
+      applySettings(next);
+      refreshSettingsUI();
+      if (opts && opts.flash) flash(root, opts.flash);
+    }
+
+    function setSettingsOpen(open) {
+      setPanel.hidden = !open;
+      setBtn.setAttribute("aria-pressed", String(!!open));
+      root.classList.toggle("jl-settings-open", !!open);
+      if (open) refreshSettingsUI();
+    }
+
+    if (setBtn) setBtn.addEventListener("click", () => setSettingsOpen(setPanel.hidden));
+    setCloseBtn.addEventListener("click", () => setSettingsOpen(false));
+    setResetBtn.addEventListener("click", () => {
+      writeSettings(SETTINGS_DEFAULTS);
+      applySettings({ ...SETTINGS_DEFAULTS });
+      refreshSettingsUI();
+      flash(root, "Settings reset to defaults");
+    });
+
+    setThemeRow.addEventListener("click", (ev) => {
+      const btn = ev.target.closest("button[data-set-theme]");
+      if (!btn) return;
+      setThemePref(btn.dataset.setTheme);
+      refreshSettingsUI();
+    });
+    setFontRow.addEventListener("click", (ev) => {
+      const btn = ev.target.closest("button[data-set-font]");
+      if (!btn) return;
+      updateSettings({ font: btn.dataset.setFont });
+    });
+    setFontSize.addEventListener("input", () => {
+      setFontSizeVal.textContent = `${setFontSize.value}px`;
+      updateSettings({ fontSize: Number(setFontSize.value) });
+    });
+    setIndentRow.addEventListener("click", (ev) => {
+      const btn = ev.target.closest("button[data-set-indent]");
+      if (!btn) return;
+      const next = Number(btn.dataset.setIndent);
+      updateSettings({ indent: next });
+      if (root.classList.contains("jl-raw-mode")) {
+        root.querySelector(".jl-raw code").textContent = serialize();
+      }
+    });
+    setAccentRow.addEventListener("click", (ev) => {
+      const btn = ev.target.closest("button[data-set-accent]");
+      if (!btn) return;
+      updateSettings({ accent: btn.dataset.setAccent });
+    });
+    setAccentCustom.addEventListener("input", () => {
+      if (HEX_RE.test(setAccentCustom.value)) updateSettings({ accent: setAccentCustom.value });
+    });
+    refreshSettingsUI();
     // ---------- filter wiring ----------
     const filterInput = root.querySelector(".jl-filter-input");
     const filterStatus = root.querySelector(".jl-filter-status");
@@ -5964,6 +6222,7 @@
         { id: "history", label: "Toggle history timeline", hint: "H", icon: ICONS.history, run: () => root.querySelector('[data-action="history"]').click() },
         { id: "history-clear", label: "Clear history for this URL", hint: "History", icon: ICONS.trash, run: () => { setHistoryOpen(true); clearHistoryForCurrent(); } },
         { id: "raw", label: inRaw ? "Show interactive tree" : "Show raw JSON text", hint: "View", icon: ICONS.raw, run: () => root.querySelector('[data-action="raw"]').click() },
+        { id: "settings", label: "Open settings — theme, font, indent, accent", hint: "Settings", icon: ICONS.gear, run: () => { setPaletteOpen(false); setSettingsOpen(true); } },
         { id: "focus-search", label: "Focus search bar", hint: "⌘⇧K", icon: ICONS.search, run: () => { setPaletteOpen(false); searchInput.focus(); searchInput.select(); } },
         { id: "focus-filter", label: "Focus jq-style path filter", hint: "/", icon: ICONS.filter, run: () => { setPaletteOpen(false); filterInput.focus(); filterInput.select(); } },
         ...(isTabularArray(parsed) ? [
@@ -6775,6 +7034,8 @@
     injectStylesheet();
     applyTheme(readThemePref());
     bindThemeAutoListener();
+    const settings = readSettings();
+    applySettings(settings);
     const shell = buildShell(parsed.value, rawText);
 
     pre.style.display = "none";
@@ -6782,6 +7043,7 @@
 
     document.body.appendChild(shell);
     document.documentElement.setAttribute("data-json-lens", "active");
+    applySettings(settings);
     STATE.replaced = true;
     return true;
   }
