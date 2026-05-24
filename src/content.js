@@ -1301,6 +1301,56 @@
     return el;
   }
 
+  // ---------- schema comparison ----------
+  // Walks two inferred-schema trees (from inferSchema()) in parallel and
+  // emits a flat list of structural differences:
+  //   - added:        key/path exists only in B
+  //   - removed:      key/path exists only in A
+  //   - type-changed: same path, different type-set
+  //   - optional-changed: same path, presence ratio (count/parent) shifted
+  //                       meaningfully between A and B (>= 25pp)
+  // Output rows carry the path in JSONPath-ish form so the user can copy
+  // and feed them straight into the JSONPath evaluator.
+  function jpJoin(base, key) {
+    if (/^[A-Za-z_$][\w$]*$/.test(key)) return base + "." + key;
+    return base + "[" + JSON.stringify(key) + "]";
+  }
+
+  function compareSchemas(a, b, path, out, parentA, parentB) {
+    path = path || "$";
+    out = out || [];
+    if (a && !b) { out.push({ path, kind: "removed", aTypes: schemaTypeLabel(a), aCount: a.count, parentACount: parentA ? parentA.count : a.count }); return out; }
+    if (!a && b) { out.push({ path, kind: "added", bTypes: schemaTypeLabel(b), bCount: b.count, parentBCount: parentB ? parentB.count : b.count }); return out; }
+    if (!a && !b) return out;
+    const aTypes = schemaTypeLabel(a);
+    const bTypes = schemaTypeLabel(b);
+    const aKey = aTypes.slice().sort().join("|");
+    const bKey = bTypes.slice().sort().join("|");
+    if (aKey !== bKey) {
+      out.push({ path, kind: "type-changed", aTypes, bTypes, aCount: a.count, bCount: b.count });
+    } else if (parentA && parentB && parentA.count && parentB.count) {
+      // Optionality / coverage shift on a shared key.
+      const ra = a.count / parentA.count;
+      const rb = b.count / parentB.count;
+      if (Math.abs(ra - rb) >= 0.25 && !(ra === 1 && rb === 1)) {
+        out.push({ path, kind: "optional-changed", aRatio: ra, bRatio: rb, aCount: a.count, bCount: b.count, parentACount: parentA.count, parentBCount: parentB.count });
+      }
+    }
+    const keys = new Set();
+    for (const k of a.children.keys()) keys.add(k);
+    for (const k of b.children.keys()) keys.add(k);
+    const ordered = Array.from(keys).sort();
+    for (const k of ordered) {
+      compareSchemas(a.children.get(k) || null, b.children.get(k) || null, jpJoin(path, k), out, a, b);
+    }
+    if (a.items || b.items) {
+      compareSchemas(a.items || null, b.items || null, path + "[*]", out, a, b);
+    }
+    return out;
+  }
+
+  ns.compareSchemas = (av, bv) => compareSchemas(inferSchema(av), inferSchema(bv));
+
   function schemaSummary(rootNode) {
     let objects = 0;
     let arrays = 0;
@@ -2138,6 +2188,10 @@
             </div>
             <div class="jl-diff-summary" aria-live="polite"></div>
             <div class="jl-diff-tools">
+              <div class="jl-diff-mode" role="group" aria-label="Diff mode">
+                <button type="button" class="jl-diff-mode-btn jl-diff-mode-active" data-diff-mode="values" aria-pressed="true" title="Compare raw values">${ICONS.diff}<span>Values</span></button>
+                <button type="button" class="jl-diff-mode-btn" data-diff-mode="schemas" aria-pressed="false" title="Compare inferred schemas — added, removed, type-changed paths">${ICONS.schema}<span>Schemas</span></button>
+              </div>
               <button class="jl-btn jl-btn-ghost jl-diff-swap" type="button" title="Swap A and B" aria-label="Swap A and B">${ICONS.diff}<span>Swap</span></button>
               <button class="jl-btn jl-btn-ghost jl-diff-copy" type="button" title="Copy diff as JSON Patch" aria-label="Copy diff as JSON Patch">${ICONS.copy}<span>Patch</span></button>
               <button class="jl-btn jl-btn-ghost jl-diff-close" type="button" title="Close diff" aria-label="Close diff">${ICONS.close}</button>
@@ -2164,6 +2218,19 @@
               <div class="jl-diff-pane-header"><span class="jl-diff-tag" data-side="b">B</span><span class="jl-diff-pane-meta"></span></div>
               <div class="jl-diff-pane-body"></div>
             </div>
+          </div>
+          <div class="jl-diff-schema-body" role="list" aria-label="Schema differences" hidden></div>
+          <div class="jl-diff-schema-empty" hidden>
+            <svg class="jl-diff-schema-empty-art" viewBox="0 0 160 110" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="24" y="30" width="48" height="50" rx="6"/>
+              <rect x="88" y="30" width="48" height="50" rx="6"/>
+              <path d="M72 55h16" opacity="0.6"/>
+              <path d="M34 44h28M34 56h22M34 68h26" opacity="0.55"/>
+              <path d="M98 44h28M98 56h22M98 68h26" opacity="0.55"/>
+              <path d="M118 22l4 4 8-8" opacity="0.8"/>
+            </svg>
+            <div class="jl-diff-schema-empty-title">Schemas match</div>
+            <div class="jl-diff-schema-empty-hint">Both endpoints inferred to the same shape — same keys, same types, same optionality.</div>
           </div>
         </section>
         <section class="jl-jsonpath-panel" hidden aria-label="JSONPath evaluator">
@@ -3160,6 +3227,12 @@
     const diffCloseBtn = root.querySelector(".jl-diff-close");
     const diffSwapBtn = root.querySelector(".jl-diff-swap");
     const diffCopyBtn = root.querySelector(".jl-diff-copy");
+    const diffBody = root.querySelector(".jl-diff-body");
+    const diffSchemaBody = root.querySelector(".jl-diff-schema-body");
+    const diffSchemaEmpty = root.querySelector(".jl-diff-schema-empty");
+    const diffModeBtns = root.querySelectorAll(".jl-diff-mode-btn");
+    let diffMode = "values"; // "values" | "schemas"
+    let diffSchemaRows = [];
     let diffOps = [];
     let diffSideA = parsed;
     let diffSideB = null;
@@ -3179,12 +3252,150 @@
       diffInputB.value = a;
     });
     diffCopyBtn.addEventListener("click", async () => {
+      if (diffMode === "schemas") {
+        if (!diffSchemaRows.length) { flash(root, "No schema diff yet"); return; }
+        try {
+          await navigator.clipboard.writeText(JSON.stringify(diffSchemaRows, null, 2));
+          flash(root, "Schema diff copied");
+        } catch { flash(root, "Copy failed"); }
+        return;
+      }
       if (!diffOps.length) { flash(root, "No diff yet"); return; }
       try {
         await navigator.clipboard.writeText(JSON.stringify(diffOps, null, 2));
         flash(root, "Patch copied");
       } catch { flash(root, "Copy failed"); }
     });
+
+    function setDiffMode(next) {
+      if (next !== "values" && next !== "schemas") return;
+      diffMode = next;
+      diffModeBtns.forEach((b) => {
+        const on = b.getAttribute("data-diff-mode") === next;
+        b.classList.toggle("jl-diff-mode-active", on);
+        b.setAttribute("aria-pressed", String(on));
+      });
+      diffPanel.classList.toggle("jl-diff-mode-schemas", next === "schemas");
+      diffBody.hidden = next === "schemas";
+      diffSchemaBody.hidden = next !== "schemas";
+      diffSchemaEmpty.hidden = true;
+      diffCopyBtn.title = next === "schemas" ? "Copy schema diff as JSON" : "Copy diff as JSON Patch";
+      diffCopyBtn.setAttribute("aria-label", diffCopyBtn.title);
+      const label = diffCopyBtn.querySelector("span");
+      if (label) label.textContent = next === "schemas" ? "JSON" : "Patch";
+      // Re-render existing data on mode switch if we have both sides loaded.
+      if (diffSideB !== null) renderDiffResult();
+      else { diffSummary.textContent = ""; }
+    }
+    diffModeBtns.forEach((b) => {
+      b.addEventListener("click", () => setDiffMode(b.getAttribute("data-diff-mode")));
+    });
+
+    function renderSchemaDiff(rows) {
+      diffSchemaBody.innerHTML = "";
+      if (!rows.length) {
+        diffSchemaEmpty.hidden = false;
+        return;
+      }
+      diffSchemaEmpty.hidden = true;
+      // Group by kind for tidy presentation.
+      const order = ["added", "removed", "type-changed", "optional-changed"];
+      const kindLabel = {
+        added: "Added in B",
+        removed: "Removed in B",
+        "type-changed": "Type changed",
+        "optional-changed": "Optionality changed",
+      };
+      const groups = new Map();
+      for (const k of order) groups.set(k, []);
+      for (const r of rows) {
+        if (!groups.has(r.kind)) groups.set(r.kind, []);
+        groups.get(r.kind).push(r);
+      }
+      const frag = document.createDocumentFragment();
+      for (const [kind, list] of groups) {
+        if (!list.length) continue;
+        const sect = document.createElement("section");
+        sect.className = "jl-sd-group jl-sd-group-" + kind;
+        const head = document.createElement("div");
+        head.className = "jl-sd-group-head";
+        const badge = document.createElement("span");
+        badge.className = "jl-sd-kind jl-sd-kind-" + kind;
+        badge.textContent = kindLabel[kind] || kind;
+        head.appendChild(badge);
+        const count = document.createElement("span");
+        count.className = "jl-sd-count";
+        count.textContent = `${list.length} ${list.length === 1 ? "path" : "paths"}`;
+        head.appendChild(count);
+        sect.appendChild(head);
+        const ul = document.createElement("div");
+        ul.className = "jl-sd-rows";
+        for (const r of list) {
+          const row = document.createElement("div");
+          row.className = "jl-sd-row";
+          row.setAttribute("role", "listitem");
+          const pathEl = document.createElement("button");
+          pathEl.type = "button";
+          pathEl.className = "jl-sd-path";
+          pathEl.title = "Copy path";
+          pathEl.textContent = r.path;
+          pathEl.addEventListener("click", async () => {
+            try { await navigator.clipboard.writeText(r.path); flash(root, "Path copied"); }
+            catch { flash(root, "Copy failed"); }
+          });
+          row.appendChild(pathEl);
+          const detail = document.createElement("span");
+          detail.className = "jl-sd-detail";
+          if (kind === "added") {
+            detail.innerHTML = renderTypeBadges(r.bTypes, "b") + ` <span class="jl-sd-meta">${r.bCount}×</span>`;
+          } else if (kind === "removed") {
+            detail.innerHTML = renderTypeBadges(r.aTypes, "a") + ` <span class="jl-sd-meta">${r.aCount}×</span>`;
+          } else if (kind === "type-changed") {
+            detail.innerHTML = renderTypeBadges(r.aTypes, "a") + ` <span class="jl-sd-arrow" aria-hidden="true">${ICONS.diffArrow}</span> ` + renderTypeBadges(r.bTypes, "b");
+          } else if (kind === "optional-changed") {
+            const pa = Math.round(r.aRatio * 100);
+            const pb = Math.round(r.bRatio * 100);
+            detail.innerHTML = `<span class="jl-sd-pct jl-sd-pct-a">${pa}%</span> <span class="jl-sd-arrow" aria-hidden="true">${ICONS.diffArrow}</span> <span class="jl-sd-pct jl-sd-pct-b">${pb}%</span>`;
+          }
+          row.appendChild(detail);
+          ul.appendChild(row);
+        }
+        sect.appendChild(ul);
+        frag.appendChild(sect);
+      }
+      diffSchemaBody.appendChild(frag);
+    }
+
+    function renderTypeBadges(types, side) {
+      if (!types || !types.length) return `<span class="jl-sd-type jl-sd-type-absent">—</span>`;
+      return types.map((t) => `<span class="jl-sd-type jl-sd-type-${t} jl-sd-side-${side}">${t}</span>`).join("");
+    }
+
+    function renderDiffResult() {
+      if (diffSideB === null) return;
+      if (diffMode === "schemas") {
+        const schemaA = inferSchema(diffSideA);
+        const schemaB = inferSchema(diffSideB);
+        diffSchemaRows = compareSchemas(schemaA, schemaB);
+        const counts = { added: 0, removed: 0, "type-changed": 0, "optional-changed": 0 };
+        for (const r of diffSchemaRows) counts[r.kind] = (counts[r.kind] || 0) + 1;
+        diffSummary.textContent = diffSchemaRows.length === 0
+          ? "schemas match"
+          : `${diffSchemaRows.length} schema diff${diffSchemaRows.length === 1 ? "" : "s"} · +${counts.added} −${counts.removed} ⇄${counts["type-changed"]} ?${counts["optional-changed"]}`;
+        renderSchemaDiff(diffSchemaRows);
+      } else {
+        diffOps = computeDiff(diffSideA, diffSideB);
+        const counts = { add: 0, remove: 0, replace: 0 };
+        diffOps.forEach((o) => { counts[o.op] = (counts[o.op] || 0) + 1; });
+        diffSummary.textContent = diffOps.length === 0
+          ? "identical"
+          : `${diffOps.length} change${diffOps.length === 1 ? "" : "s"} · +${counts.add} −${counts.remove} ~${counts.replace}`;
+        diffPaneA.innerHTML = "";
+        diffPaneB.innerHTML = "";
+        renderDiffPane(diffPaneA, diffSideA, diffOps, "a");
+        renderDiffPane(diffPaneB, diffSideB, diffOps, "b");
+      }
+    }
 
     async function loadJsonURL(url) {
       if (!url) throw new Error("URL required");
@@ -3207,6 +3418,8 @@
       diffStatus.textContent = "";
       diffPaneA.innerHTML = "";
       diffPaneB.innerHTML = "";
+      diffSchemaBody.innerHTML = "";
+      diffSchemaEmpty.hidden = true;
       diffSummary.textContent = "";
       const urlA = diffInputA.value.trim();
       const urlB = diffInputB.value.trim();
@@ -3221,14 +3434,7 @@
         diffSideB = b.value;
         diffMetaA.textContent = `${formatBytes(a.bytes)}`;
         diffMetaB.textContent = `${formatBytes(b.bytes)}`;
-        diffOps = computeDiff(a.value, b.value);
-        const counts = { add: 0, remove: 0, replace: 0 };
-        diffOps.forEach((o) => { counts[o.op] = (counts[o.op] || 0) + 1; });
-        diffSummary.textContent = diffOps.length === 0
-          ? "identical"
-          : `${diffOps.length} change${diffOps.length === 1 ? "" : "s"} · +${counts.add} −${counts.remove} ~${counts.replace}`;
-        renderDiffPane(diffPaneA, a.value, diffOps, "a");
-        renderDiffPane(diffPaneB, b.value, diffOps, "b");
+        renderDiffResult();
         diffStatus.textContent = "";
       } catch (err) {
         diffStatus.textContent = err && err.message ? err.message : "Diff failed";
