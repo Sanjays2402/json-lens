@@ -663,6 +663,7 @@
     globe: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><path d="M3 12h18"/><path d="M12 4c2.5 2.5 4 5 4 8s-1.5 5.5-4 8c-2.5-2.5-4-5-4-8s1.5-5.5 4-8z"/></svg>`,
     at: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.5"/><path d="M15.5 12V13.5a2.5 2.5 0 0 0 5 0V12a8.5 8.5 0 1 0-3.6 6.9"/></svg>`,
     network: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="3" width="8" height="5" rx="1.2"/><rect x="3" y="16" width="7" height="5" rx="1.2"/><rect x="14" y="16" width="7" height="5" rx="1.2"/><path d="M12 8v4M6.5 16v-2h11v2"/></svg>`,
+    share: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12v7a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-7"/><path d="M12 4v12"/><path d="M7 9l5-5 5 5"/></svg>`,
   };
 
   // ---------- history (snapshots per URL) ----------
@@ -1071,6 +1072,297 @@
   }
   ns.isTabularArray = isTabularArray;
   ns.generateCSV = generateCSV;
+
+  // ---------- standalone HTML snapshot ----------
+  // Build a fully self-contained HTML document that embeds the current JSON
+  // and renders an interactive collapsible tree. No network calls, no external
+  // assets; safe to share by email/Slack/Drive. The JSON is embedded inside a
+  // <script type="application/json"> block so it's not interpreted as JS.
+  function escapeForScriptJson(s) {
+    // Prevent premature </script> closing inside the embedded payload.
+    return String(s)
+      .replace(/<\/(script)/gi, "<\\/$1")
+      .replace(/<!--/g, "<\\!--")
+      .replace(/-->/g, "--\\>")
+      .replace(/\u2028/g, "\\u2028")
+      .replace(/\u2029/g, "\\u2029");
+  }
+  function escapeHTML(s) {
+    return String(s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+  function buildStandaloneSnapshot({ value, sourceUrl, title }) {
+    const ts = new Date();
+    const isoTs = ts.toISOString();
+    const human = ts.toLocaleString();
+    const safeTitle = escapeHTML(title || "JSON Lens snapshot");
+    const safeUrl = escapeHTML(sourceUrl || "");
+    let jsonText;
+    try { jsonText = JSON.stringify(value, null, 2); }
+    catch { jsonText = "\"<unserializable>\""; }
+    const bytes = new Blob([jsonText]).size;
+    const sizeLabel = bytes < 1024 ? `${bytes} B` :
+      bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KB` :
+      `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+    const embedded = escapeForScriptJson(jsonText);
+    // Inline viewer kept intentionally compact and dependency-free.
+    return `<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="generator" content="JSON Lens snapshot" />
+<meta name="snapshot-source" content="${safeUrl}" />
+<meta name="snapshot-timestamp" content="${escapeHTML(isoTs)}" />
+<title>${safeTitle}</title>
+<style>
+  :root {
+    --bg: #f7f7f9;
+    --bg-elev: rgba(255,255,255,0.72);
+    --border: rgba(15,15,20,0.08);
+    --fg: #0f0f14;
+    --muted: rgba(15,15,20,0.56);
+    --accent: #7a5cff;
+    --string: #167e5b;
+    --number: #b25400;
+    --boolean: #6a3fa3;
+    --null: rgba(15,15,20,0.45);
+    --key: #2a3957;
+    --row-hover: rgba(122,92,255,0.06);
+    --blob-a: radial-gradient(circle at 18% 12%, rgba(122,92,255,0.22), transparent 55%);
+    --blob-b: radial-gradient(circle at 82% 88%, rgba(80,180,255,0.18), transparent 60%);
+    color-scheme: light dark;
+  }
+  html[data-theme="dark"], html[data-theme="auto"] {
+    color-scheme: dark light;
+  }
+  @media (prefers-color-scheme: dark) {
+    html[data-theme="auto"] {
+      --bg: #0c0c11;
+      --bg-elev: rgba(22,22,30,0.72);
+      --border: rgba(255,255,255,0.08);
+      --fg: #f4f4f7;
+      --muted: rgba(244,244,247,0.55);
+      --accent: #9a82ff;
+      --string: #6dd3a8;
+      --number: #ffb472;
+      --boolean: #c8a8ff;
+      --null: rgba(244,244,247,0.42);
+      --key: #b6c1dc;
+      --row-hover: rgba(154,130,255,0.10);
+      --blob-a: radial-gradient(circle at 18% 12%, rgba(154,130,255,0.28), transparent 55%);
+      --blob-b: radial-gradient(circle at 82% 88%, rgba(80,180,255,0.18), transparent 60%);
+    }
+  }
+  html[data-theme="dark"] {
+    --bg: #0c0c11;
+    --bg-elev: rgba(22,22,30,0.72);
+    --border: rgba(255,255,255,0.08);
+    --fg: #f4f4f7;
+    --muted: rgba(244,244,247,0.55);
+    --accent: #9a82ff;
+    --string: #6dd3a8;
+    --number: #ffb472;
+    --boolean: #c8a8ff;
+    --null: rgba(244,244,247,0.42);
+    --key: #b6c1dc;
+    --row-hover: rgba(154,130,255,0.10);
+    --blob-a: radial-gradient(circle at 18% 12%, rgba(154,130,255,0.28), transparent 55%);
+    --blob-b: radial-gradient(circle at 82% 88%, rgba(80,180,255,0.18), transparent 60%);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); }
+  body {
+    font-family: "Inter", "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    letter-spacing: -0.01em;
+    line-height: 1.45;
+    min-height: 100vh;
+    position: relative;
+    overflow-x: hidden;
+  }
+  body::before, body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    background: var(--blob-a), var(--blob-b);
+    filter: blur(40px);
+  }
+  .wrap { position: relative; z-index: 1; max-width: 1100px; margin: 0 auto; padding: 24px 24px 64px; }
+  header.card {
+    background: var(--bg-elev);
+    backdrop-filter: blur(22px) saturate(1.4);
+    -webkit-backdrop-filter: blur(22px) saturate(1.4);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 16px 20px;
+    box-shadow: 0 1px 0 rgba(255,255,255,0.06) inset, 0 12px 40px rgba(15,15,20,0.06);
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 14px; }
+  .brand svg { width: 18px; height: 18px; color: var(--accent); }
+  .meta { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 200px; }
+  .meta .src { font-size: 13px; color: var(--fg); word-break: break-all; }
+  .meta .sub { font-size: 12px; color: var(--muted); }
+  .controls { display: flex; gap: 8px; align-items: center; }
+  .controls button, .controls a {
+    appearance: none; border: 1px solid var(--border); background: var(--bg-elev);
+    color: var(--fg); font: inherit; font-size: 12.5px; border-radius: 10px;
+    padding: 8px 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
+    text-decoration: none;
+    transition: transform 180ms cubic-bezier(0.16, 1, 0.3, 1), border-color 180ms, background 180ms;
+  }
+  .controls button:hover, .controls a:hover { border-color: rgba(122,92,255,0.45); transform: translateY(-1px); }
+  .controls button:focus-visible, .controls a:focus-visible { outline: 2px solid color-mix(in oklab, var(--accent), transparent 40%); outline-offset: 2px; }
+  .controls svg { width: 15px; height: 15px; }
+  .stats { display: flex; gap: 12px; align-items: center; font-size: 12px; color: var(--muted); }
+  .stats .pill {
+    padding: 3px 8px; border-radius: 999px; border: 1px solid var(--border);
+    background: var(--bg-elev); color: var(--fg);
+  }
+  main.card {
+    margin-top: 16px;
+    background: var(--bg-elev);
+    backdrop-filter: blur(22px) saturate(1.4);
+    -webkit-backdrop-filter: blur(22px) saturate(1.4);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 16px 20px;
+    box-shadow: 0 1px 0 rgba(255,255,255,0.06) inset, 0 12px 40px rgba(15,15,20,0.06);
+  }
+  .tree { font-family: "JetBrains Mono", "SF Mono", ui-monospace, "Menlo", monospace; font-size: 13px; line-height: 1.55; }
+  .node { padding-left: 18px; position: relative; }
+  .row { padding: 1px 4px; border-radius: 6px; cursor: default; display: block; white-space: pre-wrap; word-break: break-word; }
+  .row:hover { background: var(--row-hover); }
+  .caret { display: inline-block; width: 14px; text-align: center; cursor: pointer; color: var(--muted); transition: transform 180ms cubic-bezier(0.16, 1, 0.3, 1); user-select: none; }
+  .caret.open { transform: rotate(90deg); }
+  .key { color: var(--key); }
+  .str { color: var(--string); }
+  .num { color: var(--number); }
+  .bool { color: var(--boolean); }
+  .nul { color: var(--null); font-style: italic; }
+  .meta-count { color: var(--muted); font-size: 11.5px; margin-left: 6px; }
+  .children { padding-left: 14px; border-left: 1px solid var(--border); margin-left: 4px; }
+  .children.collapsed { display: none; }
+  .footer { margin-top: 18px; font-size: 11.5px; color: var(--muted); text-align: center; }
+  .footer a { color: var(--accent); text-decoration: none; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="card">
+      <div class="brand">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="6"/><path d="M16 16l4 4"/></svg>
+        <span>JSON Lens</span>
+      </div>
+      <div class="meta">
+        <div class="src">${safeUrl || "&lt;no source URL&gt;"}</div>
+        <div class="sub">Snapshot captured ${escapeHTML(human)}</div>
+      </div>
+      <div class="stats">
+        <span class="pill">${escapeHTML(sizeLabel)}</span>
+      </div>
+      <div class="controls">
+        <button type="button" id="expandAll" title="Expand all">Expand</button>
+        <button type="button" id="collapseAll" title="Collapse all">Collapse</button>
+        <button type="button" id="copyJson" title="Copy JSON">Copy JSON</button>
+        <button type="button" id="themeToggle" title="Toggle theme">Theme</button>
+      </div>
+    </header>
+    <main class="card">
+      <div id="tree" class="tree"></div>
+    </main>
+    <div class="footer">Generated by <a href="https://github.com/Sanjays2402" rel="noreferrer">JSON Lens</a> · standalone snapshot · no network calls</div>
+  </div>
+  <script id="payload" type="application/json">${embedded}</script>
+  <script>
+  (function () {
+    var payload;
+    try { payload = JSON.parse(document.getElementById("payload").textContent); }
+    catch (e) { document.getElementById("tree").textContent = "Failed to parse embedded JSON."; return; }
+    function esc(s) { return String(s).replace(/[&<>\"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+    function fmtVal(v) {
+      if (v === null) return '<span class="nul">null</span>';
+      switch (typeof v) {
+        case "string": return '<span class="str">"' + esc(v) + '"</span>';
+        case "number": return '<span class="num">' + v + '</span>';
+        case "boolean": return '<span class="bool">' + v + '</span>';
+      }
+      return esc(String(v));
+    }
+    function render(parent, key, value, depth) {
+      var node = document.createElement("div");
+      node.className = "node";
+      var row = document.createElement("div");
+      row.className = "row";
+      var isObj = value && typeof value === "object";
+      var isArr = Array.isArray(value);
+      var entries = isObj ? (isArr ? value.map(function (v, i) { return [i, v]; }) : Object.keys(value).map(function (k) { return [k, value[k]]; })) : null;
+      var keyPart = (key !== null) ? '<span class="key">' + (isArr ? key : '"' + esc(key) + '"') + '</span>: ' : "";
+      if (isObj) {
+        var open = depth < 2;
+        row.innerHTML = '<span class="caret' + (open ? " open" : "") + '">▸</span>' + keyPart +
+          (isArr ? "[" : "{") + '<span class="meta-count">' + entries.length + (isArr ? " items" : " keys") + '</span>' + (entries.length ? "" : (isArr ? "]" : "}"));
+        node.appendChild(row);
+        if (entries.length) {
+          var kids = document.createElement("div");
+          kids.className = "children" + (open ? "" : " collapsed");
+          for (var i = 0; i < entries.length; i++) render(kids, entries[i][0], entries[i][1], depth + 1);
+          var closer = document.createElement("div");
+          closer.className = "row";
+          closer.textContent = isArr ? "]" : "}";
+          node.appendChild(kids);
+          node.appendChild(closer);
+          var caret = row.querySelector(".caret");
+          caret.addEventListener("click", function () {
+            var collapsed = kids.classList.toggle("collapsed");
+            caret.classList.toggle("open", !collapsed);
+          });
+        }
+      } else {
+        row.innerHTML = keyPart + fmtVal(value);
+        node.appendChild(row);
+      }
+      parent.appendChild(node);
+    }
+    var tree = document.getElementById("tree");
+    render(tree, null, payload, 0);
+    function setAll(open) {
+      var carets = tree.querySelectorAll(".caret");
+      var kids = tree.querySelectorAll(".children");
+      carets.forEach(function (c) { c.classList.toggle("open", open); });
+      kids.forEach(function (k) { k.classList.toggle("collapsed", !open); });
+    }
+    document.getElementById("expandAll").addEventListener("click", function () { setAll(true); });
+    document.getElementById("collapseAll").addEventListener("click", function () { setAll(false); });
+    document.getElementById("copyJson").addEventListener("click", function () {
+      var text = JSON.stringify(payload, null, 2);
+      try {
+        navigator.clipboard.writeText(text).then(function () {
+          var b = document.getElementById("copyJson");
+          var prev = b.textContent; b.textContent = "Copied ✓"; setTimeout(function () { b.textContent = prev; }, 1200);
+        });
+      } catch (e) {}
+    });
+    var t = document.getElementById("themeToggle");
+    t.addEventListener("click", function () {
+      var cur = document.documentElement.getAttribute("data-theme") || "auto";
+      var next = cur === "auto" ? "light" : cur === "light" ? "dark" : "auto";
+      document.documentElement.setAttribute("data-theme", next);
+      t.textContent = "Theme: " + next;
+    });
+  })();
+  </script>
+</body>
+</html>
+`;
+  }
+  ns.buildStandaloneSnapshot = buildStandaloneSnapshot;
 
   // ---------- JSON Schema generation ----------
   // Walks the value and emits a draft-07 JSON Schema. Arrays of objects
@@ -2116,6 +2408,7 @@
             <button class="jl-btn jl-btn-ghost" data-action="format" title="Toggle pretty / minify" aria-label="Toggle pretty or minify" aria-pressed="false"><span class="jl-format-icon">${ICONS.pretty}</span><span class="jl-format-label">Pretty</span></button>
             <button class="jl-btn" data-action="copy" title="Copy JSON" aria-label="Copy JSON">${ICONS.copy}<span>Copy</span></button>
             <button class="jl-btn" data-action="download" title="Download JSON" aria-label="Download JSON">${ICONS.download}<span>Save</span></button>
+            <button class="jl-btn jl-btn-ghost" data-action="snapshot" title="Export standalone shareable HTML snapshot" aria-label="Export standalone HTML snapshot">${ICONS.share}<span>Snapshot</span></button>
             <button class="jl-btn jl-btn-ghost jl-btn-curl" data-action="copy-curl-patch" title="Copy edits as curl PATCH" aria-label="Copy edits as curl PATCH" disabled aria-disabled="true">${ICONS.patch}<span>cURL PATCH</span><span class="jl-curl-count" aria-hidden="true"></span></button>
             <button class="jl-btn jl-btn-ghost" data-action="schema" title="Inferred schema" aria-label="Inferred schema" aria-pressed="false">${ICONS.schema}<span>Schema</span></button>
             <button class="jl-btn jl-btn-ghost" data-action="diff" title="Diff against another JSON URL" aria-label="Diff against another JSON URL" aria-pressed="false">${ICONS.diff}<span>Diff</span></button>
@@ -2860,6 +3153,28 @@
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
+    });
+    root.querySelector('[data-action="snapshot"]').addEventListener("click", () => {
+      try {
+        const base = (location.pathname.split("/").pop() || "document").replace(/\.json$/i, "") || "document";
+        const html = buildStandaloneSnapshot({
+          value: parsed,
+          sourceUrl: location.href,
+          title: `${base} — JSON Lens snapshot`,
+        });
+        const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${base}.snapshot.html`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        flash(root, "Snapshot saved");
+      } catch (err) {
+        flash(root, "Snapshot failed");
+      }
     });
     const curlBtn = root.querySelector('[data-action="copy-curl-patch"]');
     if (curlBtn) {
@@ -4772,6 +5087,7 @@
         { id: "format", label: compact ? "Pretty-print JSON" : "Minify JSON", hint: "Format", icon: compact ? ICONS.pretty : ICONS.minify, run: () => formatBtn.click() },
         { id: "copy", label: "Copy JSON to clipboard", hint: "Clipboard", icon: ICONS.copy, run: () => root.querySelector('[data-action="copy"]').click() },
         { id: "download", label: "Download JSON", hint: "File", icon: ICONS.download, run: () => root.querySelector('[data-action="download"]').click() },
+        { id: "snapshot", label: "Export standalone HTML snapshot", hint: "Share", icon: ICONS.share, run: () => root.querySelector('[data-action="snapshot"]').click() },
         ...(curlBtn && !curlBtn.disabled ? [
           { id: "copy-curl-patch", label: "Copy edits as cURL PATCH", hint: "Clipboard", icon: ICONS.patch, run: () => curlBtn.click() },
         ] : []),
