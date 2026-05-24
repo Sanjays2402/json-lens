@@ -623,6 +623,7 @@
     arrowDown: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v13"/><path d="M6 12l6 6 6-6"/></svg>`,
     expand: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4H5a1 1 0 0 0-1 1v4"/><path d="M15 4h4a1 1 0 0 1 1 1v4"/><path d="M9 20H5a1 1 0 0 1-1-1v-4"/><path d="M15 20h4a1 1 0 0 0 1-1v-4"/></svg>`,
     collapse: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9h5V4"/><path d="M20 9h-5V4"/><path d="M4 15h5v5"/><path d="M20 15h-5v5"/></svg>`,
+    fold: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12h16"/><path d="M9 7l3-3 3 3"/><path d="M9 17l3 3 3-3"/></svg>`,
     schema: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4" width="7" height="6" rx="1.5"/><rect x="13.5" y="4" width="7" height="6" rx="1.5"/><rect x="3.5" y="14" width="7" height="6" rx="1.5"/><rect x="13.5" y="14" width="7" height="6" rx="1.5"/></svg>`,
     braces: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4c-2 0-3 1-3 3v3c0 1.5-1 2-2 2 1 0 2 .5 2 2v3c0 2 1 3 3 3"/><path d="M15 4c2 0 3 1 3 3v3c0 1.5 1 2 2 2-1 0-2 .5-2 2v3c0 2-1 3-3 3"/></svg>`,
     jsonSchema: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4h9l4 4v12a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z"/><path d="M15 4v5h5"/><path d="M10 13c-1 0-1.5.5-1.5 1.5S9 16 10 16M14 13c1 0 1.5.5 1.5 1.5S15 16 14 16"/></svg>`,
@@ -2040,6 +2041,7 @@
     node.className = "jl-node";
     node.setAttribute("data-type", t);
     node.setAttribute("data-path", pathStr);
+    node.setAttribute("data-depth", String(depth));
     if (key !== undefined && key !== null) node.setAttribute("data-key", String(key));
 
     const row = document.createElement("div");
@@ -2725,6 +2727,21 @@
           <div class="jl-actions">
             <button class="jl-btn jl-btn-ghost" data-action="expand" title="Expand all" aria-label="Expand all">${ICONS.expand}</button>
             <button class="jl-btn jl-btn-ghost" data-action="collapse" title="Collapse all" aria-label="Collapse all">${ICONS.collapse}</button>
+            <div class="jl-fold-wrap">
+              <button class="jl-btn jl-btn-ghost jl-fold-btn" data-action="fold" title="Fold tree to a specific depth" aria-label="Fold to depth" aria-haspopup="true" aria-expanded="false">${ICONS.fold}<span>Depth</span><span class="jl-fold-caret" aria-hidden="true">${ICONS.caret}</span></button>
+              <div class="jl-fold-pop" role="menu" aria-label="Fold to depth" hidden>
+                <div class="jl-fold-pop-title">Fold to depth</div>
+                <div class="jl-fold-pop-row" role="group">
+                  <button type="button" role="menuitemradio" data-fold-depth="1">1</button>
+                  <button type="button" role="menuitemradio" data-fold-depth="2">2</button>
+                  <button type="button" role="menuitemradio" data-fold-depth="3">3</button>
+                  <button type="button" role="menuitemradio" data-fold-depth="4">4</button>
+                  <button type="button" role="menuitemradio" data-fold-depth="5">5</button>
+                  <button type="button" role="menuitemradio" data-fold-depth="all" title="Expand everything">All</button>
+                </div>
+                <div class="jl-fold-pop-hint">Containers deeper than the chosen depth collapse; shallower ones expand.</div>
+              </div>
+            </div>
             <button class="jl-btn jl-btn-ghost" data-action="format" title="Toggle pretty / minify" aria-label="Toggle pretty or minify" aria-pressed="false"><span class="jl-format-icon">${ICONS.pretty}</span><span class="jl-format-label">Pretty</span></button>
             <button class="jl-btn" data-action="copy" title="Copy JSON" aria-label="Copy JSON">${ICONS.copy}<span>Copy</span></button>
             <button class="jl-btn" data-action="download" title="Download JSON" aria-label="Download JSON">${ICONS.download}<span>Save</span></button>
@@ -3677,6 +3694,57 @@
       setAllCollapsed(tree, true);
       flash(root, "Collapsed");
     });
+    // ---------- fold-by-depth ----------
+    // Expand every container at depth < N and collapse those at depth >= N.
+    // N === "all" expands everything. Materializes lazy nodes first so the
+    // depth attribute is populated across the whole tree.
+    const foldWrap = root.querySelector(".jl-fold-wrap");
+    if (foldWrap) {
+      const foldBtn = foldWrap.querySelector('[data-action="fold"]');
+      const foldPop = foldWrap.querySelector(".jl-fold-pop");
+      const closeFold = () => {
+        foldPop.hidden = true;
+        foldBtn.setAttribute("aria-expanded", "false");
+      };
+      const openFold = () => {
+        foldPop.hidden = false;
+        foldBtn.setAttribute("aria-expanded", "true");
+      };
+      foldBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (foldPop.hidden) openFold(); else closeFold();
+      });
+      document.addEventListener("click", (e) => {
+        if (foldPop.hidden) return;
+        if (!foldWrap.contains(e.target)) closeFold();
+      });
+      foldPop.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") { closeFold(); foldBtn.focus(); }
+      });
+      const applyFold = (raw) => {
+        materializeAll(tree);
+        const all = tree.querySelectorAll('.jl-node[data-type="object"], .jl-node[data-type="array"]');
+        if (raw === "all") {
+          all.forEach((n) => setCollapsed(n, false));
+        } else {
+          const n = Math.max(1, Math.min(20, parseInt(raw, 10) || 1));
+          all.forEach((node) => {
+            const d = parseInt(node.getAttribute("data-depth") || "0", 10);
+            setCollapsed(node, d >= n);
+          });
+        }
+        foldPop.querySelectorAll("[data-fold-depth]").forEach((b) => {
+          b.setAttribute("aria-checked", b.getAttribute("data-fold-depth") === String(raw) ? "true" : "false");
+        });
+        flash(root, raw === "all" ? "Expanded all depths" : `Folded to depth ${raw}`);
+      };
+      foldPop.querySelectorAll("[data-fold-depth]").forEach((b) => {
+        b.addEventListener("click", () => {
+          applyFold(b.getAttribute("data-fold-depth"));
+          closeFold();
+        });
+      });
+    }
     // ---------- heatmap wiring ----------
     // Walk parsed JSON. For each array, group numeric leaves either by
     // "" (when items are numbers directly) or by relative path within each

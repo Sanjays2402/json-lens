@@ -37,3 +37,13 @@ This file is the agent's task queue. Unchecked items get implemented in order. W
 - [x] Time-series detection: chart numeric arrays of {timestamp, value} inline
 - [x] Saved query workspace — store named jq/JSONPath expressions per domain
 - [x] Settings panel with theme, font, indent width, and accent color picker
+- [x] Fold-by-depth controls — expand/collapse all to a chosen depth with one click
+- [ ] Locale-aware date/time rendering for detected timestamp fields
+- [ ] Inline image preview for base64 data URLs and image content-type leaves
+- [ ] Markdown rendering for long string values with a toggle per node
+- [ ] Hex/binary viewer for buffer-like arrays of small integers
+- [ ] Per-domain default view (tree/raw/table) remembered across sessions
+- [ ] Quick-cast leaf values (string↔number↔bool) with type-safety warnings
+- [ ] Export tree as Markdown table for tabular arrays
+- [ ] Treemap visualization of object size distribution
+- [ ] Recently viewed URLs strip with thumbnails of the captured tree
