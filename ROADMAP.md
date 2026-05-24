@@ -34,6 +34,6 @@ This file is the agent's task queue. Unchecked items get implemented in order. W
 - [x] Schema comparison: diff inferred schemas between two endpoints
 - [x] Export current view as standalone shareable HTML snapshot
 - [x] Heatmap mode — colorize numeric leaves by relative magnitude within their array
-- [ ] Time-series detection: chart numeric arrays of {timestamp, value} inline
+- [x] Time-series detection: chart numeric arrays of {timestamp, value} inline
 - [ ] Saved query workspace — store named jq/JSONPath expressions per domain
 - [ ] Settings panel with theme, font, indent width, and accent color picker

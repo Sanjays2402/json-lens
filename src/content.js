@@ -665,6 +665,7 @@
     network: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="3" width="8" height="5" rx="1.2"/><rect x="3" y="16" width="7" height="5" rx="1.2"/><rect x="14" y="16" width="7" height="5" rx="1.2"/><path d="M12 8v4M6.5 16v-2h11v2"/></svg>`,
     share: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12v7a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-7"/><path d="M12 4v12"/><path d="M7 9l5-5 5 5"/></svg>`,
     flame: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3c1.5 3 4.5 4.5 4.5 8a4.5 4.5 0 1 1-9 0c0-1.8 1-3 1-4.5 0 1.2 1 2 2 2 0-2 .5-3.5 1.5-5.5z"/><path d="M10.5 16.5c.5 1 1 1.5 1.5 1.5s1-.5 1.5-1.5"/></svg>`,
+    chart: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4v15a1 1 0 0 0 1 1h15"/><path d="M7 15l4-5 3 3 5-7"/><circle cx="7" cy="15" r="1" fill="currentColor" stroke="none"/><circle cx="11" cy="10" r="1" fill="currentColor" stroke="none"/><circle cx="14" cy="13" r="1" fill="currentColor" stroke="none"/><circle cx="19" cy="6" r="1" fill="currentColor" stroke="none"/></svg>`,
   };
 
   // ---------- history (snapshots per URL) ----------
@@ -1073,6 +1074,242 @@
   }
   ns.isTabularArray = isTabularArray;
   ns.generateCSV = generateCSV;
+
+  // ---------- time-series detection ----------
+  // A value is a "time series" when it is an array of plain objects (≥2 rows)
+  // with one key whose values consistently parse as timestamps and another
+  // key whose values are finite numbers. Common key names get a score bonus
+  // so {timestamp,value}, {ts,count}, {date,price} all win cleanly even when
+  // other numeric/timestamp-shaped columns exist.
+  const TS_KEY_HINTS = ["timestamp","time","ts","datetime","date","at","createdat","created_at","updatedat","updated_at","t","x"];
+  const VAL_KEY_HINTS = ["value","val","y","count","amount","price","close","open","high","low","total","qty","volume"];
+  const TS_DETECT_MAX = 5000;
+  function parseTimestampLoose(v) {
+    if (typeof v === "number" && Number.isFinite(v)) {
+      // Heuristic: ms epoch in (~2001..~3236) range; seconds epoch in (~2001..~3236)
+      if (v >= 1e12 && v < 4e13) return v;
+      if (v >= 1e9 && v < 4e10) return v * 1000;
+      return null;
+    }
+    if (typeof v === "string") {
+      const s = v.trim();
+      if (!s) return null;
+      if (/^-?\d+(?:\.\d+)?$/.test(s)) return parseTimestampLoose(Number(s));
+      // Be conservative: require an ISO-ish date prefix or year-month-day
+      if (/^\d{4}-\d{1,2}-\d{1,2}(?:[T ]\d|$)/.test(s) || /^\d{4}\/\d{1,2}\/\d{1,2}/.test(s)) {
+        const t = Date.parse(s);
+        return Number.isFinite(t) ? t : null;
+      }
+      return null;
+    }
+    return null;
+  }
+  function detectTimeSeries(arr) {
+    if (!Array.isArray(arr) || arr.length < 2 || arr.length > TS_DETECT_MAX) return null;
+    for (let i = 0; i < arr.length; i++) {
+      const r = arr[i];
+      if (!r || typeof r !== "object" || Array.isArray(r)) return null;
+    }
+    const keys = [];
+    const seen = new Set();
+    for (const r of arr) for (const k of Object.keys(r)) if (!seen.has(k)) { seen.add(k); keys.push(k); }
+    const tsCandidates = [];
+    const valCandidates = [];
+    for (const k of keys) {
+      let tsOk = 0, valOk = 0, total = 0;
+      for (const r of arr) {
+        if (!Object.prototype.hasOwnProperty.call(r, k)) continue;
+        total++;
+        const x = r[k];
+        if (parseTimestampLoose(x) !== null) tsOk++;
+        if (typeof x === "number" && Number.isFinite(x)) valOk++;
+      }
+      if (total !== arr.length) continue;
+      const kl = k.toLowerCase();
+      const tsHint = TS_KEY_HINTS.indexOf(kl) >= 0 ? 1000 : 0;
+      const valHint = VAL_KEY_HINTS.indexOf(kl) >= 0 ? 1000 : 0;
+      if (tsOk >= Math.ceil(arr.length * 0.9)) tsCandidates.push({ k, score: tsOk + tsHint });
+      if (valOk >= Math.ceil(arr.length * 0.9)) valCandidates.push({ k, score: valOk + valHint });
+    }
+    if (!tsCandidates.length || !valCandidates.length) return null;
+    tsCandidates.sort((a, b) => b.score - a.score);
+    valCandidates.sort((a, b) => b.score - a.score);
+    const tsKey = tsCandidates[0].k;
+    const valC = valCandidates.find((c) => c.k !== tsKey);
+    if (!valC) return null;
+    const points = [];
+    for (const r of arr) {
+      const t = parseTimestampLoose(r[tsKey]);
+      const v = r[valC.k];
+      if (t !== null && typeof v === "number" && Number.isFinite(v)) points.push({ t, v });
+    }
+    if (points.length < 2) return null;
+    points.sort((a, b) => a.t - b.t);
+    return { tsKey, valKey: valC.k, points };
+  }
+  function isTimeSeriesArray(value) { return detectTimeSeries(value) !== null; }
+  ns.detectTimeSeries = detectTimeSeries;
+  ns.isTimeSeriesArray = isTimeSeriesArray;
+
+  // Build a compact SVG line chart for a detected time series. No external
+  // libraries, no network calls — just hand-rolled paths so the snapshot can
+  // ship anywhere.
+  function fmtChartTick(t, span) {
+    const d = new Date(t);
+    if (!Number.isFinite(d.getTime())) return "";
+    if (span <= 2 * 60 * 60 * 1000) {
+      return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    }
+    if (span <= 2 * 24 * 60 * 60 * 1000) {
+      return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    }
+    if (span <= 60 * 24 * 60 * 60 * 1000) {
+      return d.toLocaleDateString([], { month: "short", day: "numeric" });
+    }
+    return d.toLocaleDateString([], { year: "numeric", month: "short" });
+  }
+  function fmtChartValue(v) {
+    if (!Number.isFinite(v)) return String(v);
+    const a = Math.abs(v);
+    if (a !== 0 && (a >= 1e6 || a < 1e-2)) return v.toExponential(2);
+    if (Number.isInteger(v) && a < 1e6) return v.toLocaleString();
+    return (Math.round(v * 1000) / 1000).toLocaleString(undefined, { maximumFractionDigits: 3 });
+  }
+  function buildTimeSeriesChart(series) {
+    const W = 720, H = 240;
+    const PAD_L = 64, PAD_R = 16, PAD_T = 18, PAD_B = 34;
+    const innerW = W - PAD_L - PAD_R;
+    const innerH = H - PAD_T - PAD_B;
+    const pts = series.points;
+    let tMin = pts[0].t, tMax = pts[0].t, vMin = pts[0].v, vMax = pts[0].v;
+    for (const p of pts) {
+      if (p.t < tMin) tMin = p.t; if (p.t > tMax) tMax = p.t;
+      if (p.v < vMin) vMin = p.v; if (p.v > vMax) vMax = p.v;
+    }
+    const tSpan = Math.max(1, tMax - tMin);
+    let vSpan = vMax - vMin;
+    if (vSpan === 0) { vSpan = Math.max(1, Math.abs(vMax) || 1); vMin -= vSpan / 2; vMax += vSpan / 2; vSpan = vMax - vMin; }
+    const pad = vSpan * 0.08;
+    vMin -= pad; vMax += pad;
+    const xOf = (t) => PAD_L + ((t - tMin) / tSpan) * innerW;
+    const yOf = (v) => PAD_T + (1 - (v - vMin) / (vMax - vMin)) * innerH;
+
+    const NS = "http://www.w3.org/2000/svg";
+    const svg = document.createElementNS(NS, "svg");
+    svg.setAttribute("class", "jl-chart-svg");
+    svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+    svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+    svg.setAttribute("role", "img");
+    svg.setAttribute("aria-label", `Time series chart of ${pts.length} points`);
+
+    // gridlines + y ticks
+    const TICKS_Y = 4;
+    for (let i = 0; i <= TICKS_Y; i++) {
+      const frac = i / TICKS_Y;
+      const yVal = vMax - frac * (vMax - vMin);
+      const y = PAD_T + frac * innerH;
+      const grid = document.createElementNS(NS, "line");
+      grid.setAttribute("class", "jl-chart-grid");
+      grid.setAttribute("x1", String(PAD_L)); grid.setAttribute("x2", String(W - PAD_R));
+      grid.setAttribute("y1", String(y)); grid.setAttribute("y2", String(y));
+      svg.appendChild(grid);
+      const lbl = document.createElementNS(NS, "text");
+      lbl.setAttribute("class", "jl-chart-tick jl-chart-tick-y");
+      lbl.setAttribute("x", String(PAD_L - 8));
+      lbl.setAttribute("y", String(y + 4));
+      lbl.setAttribute("text-anchor", "end");
+      lbl.textContent = fmtChartValue(yVal);
+      svg.appendChild(lbl);
+    }
+
+    // x ticks (~5)
+    const TICKS_X = Math.min(5, pts.length);
+    for (let i = 0; i < TICKS_X; i++) {
+      const frac = TICKS_X === 1 ? 0.5 : i / (TICKS_X - 1);
+      const t = tMin + frac * tSpan;
+      const x = PAD_L + frac * innerW;
+      const tick = document.createElementNS(NS, "line");
+      tick.setAttribute("class", "jl-chart-tick-line");
+      tick.setAttribute("x1", String(x)); tick.setAttribute("x2", String(x));
+      tick.setAttribute("y1", String(PAD_T + innerH)); tick.setAttribute("y2", String(PAD_T + innerH + 4));
+      svg.appendChild(tick);
+      const lbl = document.createElementNS(NS, "text");
+      lbl.setAttribute("class", "jl-chart-tick jl-chart-tick-x");
+      lbl.setAttribute("x", String(x));
+      lbl.setAttribute("y", String(PAD_T + innerH + 18));
+      lbl.setAttribute("text-anchor", i === 0 ? "start" : i === TICKS_X - 1 ? "end" : "middle");
+      lbl.textContent = fmtChartTick(t, tSpan);
+      svg.appendChild(lbl);
+    }
+
+    // axis baseline
+    const axis = document.createElementNS(NS, "line");
+    axis.setAttribute("class", "jl-chart-axis");
+    axis.setAttribute("x1", String(PAD_L)); axis.setAttribute("x2", String(W - PAD_R));
+    axis.setAttribute("y1", String(PAD_T + innerH)); axis.setAttribute("y2", String(PAD_T + innerH));
+    svg.appendChild(axis);
+    const yAxis = document.createElementNS(NS, "line");
+    yAxis.setAttribute("class", "jl-chart-axis");
+    yAxis.setAttribute("x1", String(PAD_L)); yAxis.setAttribute("x2", String(PAD_L));
+    yAxis.setAttribute("y1", String(PAD_T)); yAxis.setAttribute("y2", String(PAD_T + innerH));
+    svg.appendChild(yAxis);
+
+    // area fill under the line
+    let areaD = "";
+    for (let i = 0; i < pts.length; i++) {
+      const cmd = i === 0 ? "M" : "L";
+      areaD += `${cmd}${xOf(pts[i].t).toFixed(2)},${yOf(pts[i].v).toFixed(2)}`;
+    }
+    areaD += `L${xOf(pts[pts.length - 1].t).toFixed(2)},${(PAD_T + innerH).toFixed(2)}`;
+    areaD += `L${xOf(pts[0].t).toFixed(2)},${(PAD_T + innerH).toFixed(2)}Z`;
+    const area = document.createElementNS(NS, "path");
+    area.setAttribute("class", "jl-chart-area");
+    area.setAttribute("d", areaD);
+    svg.appendChild(area);
+
+    // line
+    let lineD = "";
+    for (let i = 0; i < pts.length; i++) {
+      const cmd = i === 0 ? "M" : "L";
+      lineD += `${cmd}${xOf(pts[i].t).toFixed(2)},${yOf(pts[i].v).toFixed(2)}`;
+    }
+    const line = document.createElementNS(NS, "path");
+    line.setAttribute("class", "jl-chart-line");
+    line.setAttribute("d", lineD);
+    svg.appendChild(line);
+
+    // dots when not too dense
+    if (pts.length <= 120) {
+      for (const p of pts) {
+        const c = document.createElementNS(NS, "circle");
+        c.setAttribute("class", "jl-chart-dot");
+        c.setAttribute("cx", String(xOf(p.t).toFixed(2)));
+        c.setAttribute("cy", String(yOf(p.v).toFixed(2)));
+        c.setAttribute("r", "2.4");
+        const title = document.createElementNS(NS, "title");
+        title.textContent = `${new Date(p.t).toISOString()}  •  ${fmtChartValue(p.v)}`;
+        c.appendChild(title);
+        svg.appendChild(c);
+      }
+    }
+
+    // hover crosshair group (built once, positioned on pointermove)
+    const hover = document.createElementNS(NS, "g");
+    hover.setAttribute("class", "jl-chart-hover");
+    hover.setAttribute("opacity", "0");
+    const vline = document.createElementNS(NS, "line");
+    vline.setAttribute("class", "jl-chart-crosshair");
+    vline.setAttribute("y1", String(PAD_T));
+    vline.setAttribute("y2", String(PAD_T + innerH));
+    hover.appendChild(vline);
+    const hdot = document.createElementNS(NS, "circle");
+    hdot.setAttribute("class", "jl-chart-hover-dot");
+    hdot.setAttribute("r", "3.6");
+    hover.appendChild(hdot);
+    svg.appendChild(hover);
+
+    return { svg, hover, vline, hdot, xOf, yOf, pts, tMin, tSpan, PAD_L, PAD_R, PAD_T, innerW, innerH, W };
+  }
 
   // ---------- standalone HTML snapshot ----------
   // Build a fully self-contained HTML document that embeds the current JSON
@@ -1853,6 +2090,17 @@
         csvBtn.setAttribute("aria-label", "Copy as CSV");
         csvBtn.innerHTML = `${ICONS.csv}<span class="jl-row-action-label">CSV</span>`;
         actions.appendChild(csvBtn);
+      }
+      if (t === "array" && isTimeSeriesArray(value)) {
+        const chartBtn = document.createElement("button");
+        chartBtn.type = "button";
+        chartBtn.className = "jl-row-action jl-row-action-chart";
+        chartBtn.setAttribute("data-action", "toggle-chart");
+        chartBtn.setAttribute("title", "Chart this time series");
+        chartBtn.setAttribute("aria-label", "Chart this time series");
+        chartBtn.setAttribute("aria-pressed", "false");
+        chartBtn.innerHTML = `${ICONS.chart}<span class="jl-row-action-label">Chart</span>`;
+        actions.appendChild(chartBtn);
       }
     } else if (pathStr && pathStr !== "$") {
       // Only editable when this primitive sits under a parent we can address.
@@ -2964,6 +3212,8 @@
           togglePin(pathStr);
         } else if (action === "toggle-note") {
           openNoteEditor(node, pathStr);
+        } else if (action === "toggle-chart") {
+          toggleTimeSeriesChart(node, pathStr, actionBtn);
         }
         return;
       }
@@ -3297,6 +3547,95 @@
           flash(root, "Heatmap off");
         }
       });
+    }
+    // ---------- inline time-series chart wiring ----------
+    // Each container row exposing a Chart action toggles a small inline panel
+    // hosting a hand-rolled SVG line chart. Hover/move snaps to the nearest
+    // point, showing timestamp + value in a floating tooltip.
+    function toggleTimeSeriesChart(node, pathStr, btn) {
+      const existing = node.querySelector(":scope > .jl-chart");
+      if (existing) {
+        existing.remove();
+        if (btn) btn.setAttribute("aria-pressed", "false");
+        flash(root, "Chart hidden");
+        return;
+      }
+      const resolved = resolvePath(parsed, pathStr);
+      if (!resolved.ok || !Array.isArray(resolved.value)) { flash(root, "Chart unavailable"); return; }
+      const series = detectTimeSeries(resolved.value);
+      if (!series) { flash(root, "Not a time series"); return; }
+      const chart = buildTimeSeriesChart(series);
+      const wrap = document.createElement("div");
+      wrap.className = "jl-chart";
+      wrap.setAttribute("role", "region");
+      wrap.setAttribute("aria-label", `Time series chart — ${series.points.length} points, ${escapeHTML(series.valKey)} over ${escapeHTML(series.tsKey)}`);
+      const head = document.createElement("div");
+      head.className = "jl-chart-head";
+      head.innerHTML = `
+        <span class="jl-chart-icon" aria-hidden="true">${ICONS.chart}</span>
+        <span class="jl-chart-title"><code>${escapeHTML(series.valKey)}</code> over <code>${escapeHTML(series.tsKey)}</code></span>
+        <span class="jl-chart-meta"><span class="jl-chart-points">${series.points.length} points</span></span>
+        <button type="button" class="jl-icon-btn jl-chart-close" title="Close chart" aria-label="Close chart">${ICONS.close}</button>
+      `;
+      wrap.appendChild(head);
+      const body = document.createElement("div");
+      body.className = "jl-chart-body";
+      body.appendChild(chart.svg);
+      const tip = document.createElement("div");
+      tip.className = "jl-chart-tip";
+      tip.hidden = true;
+      tip.innerHTML = `<span class="jl-chart-tip-t"></span><span class="jl-chart-tip-v"></span>`;
+      body.appendChild(tip);
+      wrap.appendChild(body);
+      node.appendChild(wrap);
+
+      const tipT = tip.querySelector(".jl-chart-tip-t");
+      const tipV = tip.querySelector(".jl-chart-tip-v");
+      const findNearestIdx = (xPx) => {
+        const pts = chart.pts;
+        let lo = 0, hi = pts.length - 1;
+        while (lo < hi) {
+          const mid = (lo + hi) >> 1;
+          if (chart.xOf(pts[mid].t) < xPx) lo = mid + 1; else hi = mid;
+        }
+        if (lo > 0 && Math.abs(chart.xOf(pts[lo - 1].t) - xPx) < Math.abs(chart.xOf(pts[lo].t) - xPx)) lo--;
+        return lo;
+      };
+      const showHover = (clientX) => {
+        const rect = chart.svg.getBoundingClientRect();
+        const ratio = chart.W / rect.width;
+        const xPx = (clientX - rect.left) * ratio;
+        if (xPx < chart.PAD_L || xPx > chart.W - chart.PAD_R) { hideHover(); return; }
+        const idx = findNearestIdx(xPx);
+        const p = chart.pts[idx];
+        const cx = chart.xOf(p.t);
+        const cy = chart.yOf(p.v);
+        chart.vline.setAttribute("x1", String(cx));
+        chart.vline.setAttribute("x2", String(cx));
+        chart.hdot.setAttribute("cx", String(cx));
+        chart.hdot.setAttribute("cy", String(cy));
+        chart.hover.setAttribute("opacity", "1");
+        tip.hidden = false;
+        tipT.textContent = new Date(p.t).toISOString().replace("T", " ").replace(/\.\d+Z$/, "Z");
+        tipV.textContent = fmtChartValue(p.v);
+        const xPct = (cx / chart.W) * 100;
+        tip.style.left = xPct.toFixed(2) + "%";
+        tip.style.top = ((chart.PAD_T - 4) / 240 * 100).toFixed(2) + "%";
+        tip.classList.toggle("jl-chart-tip-right", xPct > 60);
+      };
+      const hideHover = () => {
+        chart.hover.setAttribute("opacity", "0");
+        tip.hidden = true;
+      };
+      chart.svg.addEventListener("pointermove", (ev) => showHover(ev.clientX));
+      chart.svg.addEventListener("pointerleave", hideHover);
+      head.querySelector(".jl-chart-close").addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        toggleTimeSeriesChart(node, pathStr, btn);
+      });
+      if (btn) btn.setAttribute("aria-pressed", "true");
+      if (node.classList.contains("jl-collapsed")) setCollapsed(node, false);
+      flash(root, `Chart on — ${series.points.length} points`);
     }
     // ---------- theme switch wiring ----------
     const themeSwitch = root.querySelector(".jl-theme-switch");
