@@ -1147,6 +1147,85 @@
   ns.isTabularArray = isTabularArray;
   ns.generateCSV = generateCSV;
 
+  // ---------- YAML generation ----------
+  // Compact, dependency-free YAML 1.2 emitter. Plain scalars stay bare when
+  // safe; anything else (quotes, colons, leading/trailing whitespace,
+  // newlines, reserved words like "true"/"null", number-like strings) is
+  // emitted double-quoted with standard JSON-style escapes.
+  const YAML_INDENT = "  ";
+  const YAML_PLAIN_SAFE = /^[A-Za-z0-9_](?:[A-Za-z0-9_\-. /]*[A-Za-z0-9_\-./])?$/;
+  const YAML_RESERVED = /^(?:y|Y|yes|Yes|YES|n|N|no|No|NO|true|True|TRUE|false|False|FALSE|on|On|ON|off|Off|OFF|null|Null|NULL|~|[-+]?[0-9][0-9_]*(?:\.[0-9_]*)?(?:[eE][-+]?[0-9]+)?|\.inf|\.Inf|\.INF|\.nan|\.Nan|\.NAN)$/;
+
+  function yamlScalarValue(value) {
+    const t = typeOf(value);
+    if (t === "null") return "null";
+    if (t === "boolean") return value ? "true" : "false";
+    if (t === "number") {
+      if (Number.isNaN(value)) return ".nan";
+      if (value === Infinity) return ".inf";
+      if (value === -Infinity) return "-.inf";
+      return String(value);
+    }
+    // string
+    if (value === "") return '""';
+    const safe = YAML_PLAIN_SAFE.test(value) && !YAML_RESERVED.test(value);
+    return safe ? value : JSON.stringify(value);
+  }
+
+  function yamlKey(k) {
+    const s = String(k);
+    const safe = YAML_PLAIN_SAFE.test(s) && !YAML_RESERVED.test(s);
+    return safe ? s : JSON.stringify(s);
+  }
+
+  function yamlLines(value, indent) {
+    const pad = YAML_INDENT.repeat(indent);
+    const t = typeOf(value);
+    if (t === "object") {
+      const keys = Object.keys(value);
+      if (!keys.length) return [pad + "{}"];
+      const out = [];
+      for (const k of keys) {
+        const vt = typeOf(value[k]);
+        if (vt === "object" || vt === "array") {
+          out.push(pad + yamlKey(k) + ":");
+          out.push(...yamlLines(value[k], indent + 1));
+        } else {
+          out.push(pad + yamlKey(k) + ": " + yamlScalarValue(value[k]));
+        }
+      }
+      return out;
+    }
+    if (t === "array") {
+      if (!value.length) return [pad + "[]"];
+      const out = [];
+      const cut = (indent + 1) * YAML_INDENT.length;
+      for (const item of value) {
+        const it = typeOf(item);
+        if (it === "object" || it === "array") {
+          const sub = yamlLines(item, indent + 1);
+          out.push(pad + "- " + sub[0].slice(cut));
+          for (let i = 1; i < sub.length; i++) out.push(sub[i]);
+        } else {
+          out.push(pad + "- " + yamlScalarValue(item));
+        }
+      }
+      return out;
+    }
+    return [pad + yamlScalarValue(value)];
+  }
+
+  function generateYAML(value) {
+    const t = typeOf(value);
+    if (t === "object" || t === "array") {
+      return yamlLines(value, 0).join("\n") + "\n";
+    }
+    return yamlScalarValue(value) + "\n";
+  }
+
+  // Expose for testing/debugging.
+  ns.generateYAML = generateYAML;
+
   // ---------- time-series detection ----------
   // A value is a "time series" when it is an array of plain objects (≥2 rows)
   // with one key whose values consistently parse as timestamps and another
@@ -2154,6 +2233,14 @@
       jsBtn.setAttribute("aria-label", "Copy as JSON Schema");
       jsBtn.innerHTML = `${ICONS.jsonSchema}<span class="jl-row-action-label">Schema</span>`;
       actions.appendChild(jsBtn);
+      const yamlBtn = document.createElement("button");
+      yamlBtn.type = "button";
+      yamlBtn.className = "jl-row-action jl-row-action-yaml";
+      yamlBtn.setAttribute("data-action", "copy-yaml");
+      yamlBtn.setAttribute("title", "Copy as YAML");
+      yamlBtn.setAttribute("aria-label", "Copy as YAML");
+      yamlBtn.innerHTML = `${ICONS.schema}<span class="jl-row-action-label">YAML</span>`;
+      actions.appendChild(yamlBtn);
       if (isTabularArray(value)) {
         const csvBtn = document.createElement("button");
         csvBtn.type = "button";
@@ -3429,6 +3516,18 @@
             try {
               await navigator.clipboard.writeText(src);
               flash(root, `Copied ${rowCount} ${rowCount === 1 ? "row" : "rows"} as CSV`);
+            } catch {
+              flash(root, "Copy failed");
+            }
+          })();
+        } else if (action === "copy-yaml") {
+          const resolved = resolvePath(parsed, pathStr);
+          if (!resolved.ok) { flash(root, "Copy failed"); return; }
+          const src = generateYAML(resolved.value);
+          (async () => {
+            try {
+              await navigator.clipboard.writeText(src);
+              flash(root, "Copied as YAML");
             } catch {
               flash(root, "Copy failed");
             }

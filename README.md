@@ -4,6 +4,14 @@ Interactive JSON viewer with live jq-style filter, schema inference, diff, and c
 
 > Status: **v0.1.0 — scaffold**. Features ship every 15 minutes via an autonomous agent. See `ROADMAP.md` for what's next.
 
+## Node actions
+
+Every collapsible node in the tree view carries quick actions, including:
+
+- **Copy as YAML** — copy the focused node as YAML (plain scalars stay bare; quoted
+  automatically when a value needs escaping, e.g. `"true"`, `"a: b"`, newlines).
+- Copy as TypeScript interface / JSON Schema / CSV / JSON.
+
 ## Install (dev)
 
 ```
